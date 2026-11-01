@@ -1,0 +1,24 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2021"
+description = "Codebase Archaeologist tree-sitter parser binary: deterministic symbol and edge extraction for JavaScript, TypeScript and Go. Emits a stable JSON manifest consumed by the Go CLI."
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "1"
+tree-sitter = "0.24"
+tree-sitter-go = "0.20"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.22"
+
+[features]
+default = []
+
+[profile.release]
+lto = "thin"
