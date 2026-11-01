@@ -107,7 +107,7 @@ func parseZLog(raw string, limit int) ([]CommitMeta, error) {
 	fields := strings.Split(raw, "\x00")
 	var out []CommitMeta
 	var cur *CommitMeta
-	pos := -1 // position within the current record
+	pos := 0
 	for _, f := range fields {
 		f = strings.TrimSpace(f)
 		if isSHA(f) {
@@ -118,30 +118,28 @@ func parseZLog(raw string, limit int) ([]CommitMeta, error) {
 				out = append(out, *cur)
 			}
 			cur = &CommitMeta{Commit: f}
-			pos = 0
+			pos = 1 // next field is the parents slot
 			continue
 		}
 		if cur == nil {
-			// NUL padding before the first record or between trailing fields.
+			// NUL padding before the first record.
 			continue
 		}
-		if f != "" || pos >= 2 {
-			// Empty leading fields (no parents, no subject) only matter at
-			// position < 2; keep the positional slot in every case so the
-			// record stays aligned.
-			switch pos {
-			case 1:
-				cur.Parents = strings.Fields(f)
-			case 2:
-				cur.Author = f
-			case 3:
-				cur.Date = f
-			case 4:
-				cur.Message = f
-			default: // pos >= 5
-				if f != "" {
-					cur.Files = append(cur.Files, f)
-				}
+		// Positional slots: 1=parents, 2=author, 3=date, 4=subject,
+		// 5..=files. Empty fields are consumed positionally so a record
+		// stays aligned even when a slot is blank.
+		switch pos {
+		case 1:
+			cur.Parents = strings.Fields(f)
+		case 2:
+			cur.Author = f
+		case 3:
+			cur.Date = f
+		case 4:
+			cur.Message = f
+		default:
+			if f != "" {
+				cur.Files = append(cur.Files, f)
 			}
 		}
 		pos++
