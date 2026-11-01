@@ -21,11 +21,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const PARSER_VERSION: &str = "archaeologist-parser/0.1.0";
 
 /// Stable, line-independent identity of a symbol.
-///
-/// Symbol IDs are commit-scoped: they identify a symbol within a single
-/// index run. The same logical symbol in a later commit gets a new ID
-/// (file path may have moved) but the same `key`, which is what links
-/// symbols across history.
 pub fn symbol_id(lang: &str, path: &str, kind: &str, qualified: &str) -> String {
     let mut h = Sha256::new();
     h.update(b"archaeologist:sym:v1|");
