@@ -1,0 +1,88 @@
+# Codebase Archaeologist — single-host production compose.
+#
+# Env var names below match internal/envx/envx.go exactly:
+#   DATABASE_URL      Postgres DSN (primary). Fallback: ARCH_POSTGRES_DSN.
+#   ARCH_BIND         listen address (default :8080) — used once the API lands
+#   ARCH_AUTH_KEY     API key; empty disables auth (CLI-only)
+#   ARCH_DATA_DIR     snapshots + local data (default ./data)
+#   ARCH_PARSER_BIN   parser binary path (default: "archaeologist-parser" on PATH)
+#   ARCH_LOG_LEVEL    debug|info|warn|error
+#   ARCH_LOCAL_ONLY   "true" forces the SQLite driver (not set here: we use Postgres)
+#
+# The schema (internal/store) is dialect-neutral: TEXT/INTEGER columns only,
+# so a generic initdb with no special extensions is fine — no specific DB
+# name or role is required by the code; POSTGRES_DB/POSTGRES_USER below are
+# deployment convenience, not code requirements.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: archaeologist
+      POSTGRES_USER: archaeologist
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archaeologist}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # No port published by default; uncomment for host access:
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U archaeologist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  archaeologist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Matches envx: DATABASE_URL wins; ARCH_POSTGRES_DSN is the fallback.
+      DATABASE_URL: postgres://archaeologist:${POSTGRES_PASSWORD:-archaeologist}@db:5432/archaeologist
+      # ARCH_BIND: ":8080"            # API entrypoint lands with service completion
+      # ARCH_AUTH_KEY: "change-me"    # set when the API lands; empty = no auth today
+      # ARCH_LOG_LEVEL: "info"
+      # ARCH_DATA_DIR: /var/lib/archaeologist   # image default; persist via volume
+    volumes:
+      - arch-data:/var/lib/archaeologist
+      # Repository ingestion path (internal/ingest): the target repo must be
+      # a real git working tree ON DISK inside the CLI process. Mount it
+      # read-only; the CLI resolves it via --root / working directory, one
+      # repo at a time. Snapshots are extracted by `git archive` into
+      # ARCH_DATA_DIR/snapshots/<commit>/.
+      # - /path/to/repo-on-host:/repo:ro
+      # then: docker compose run --rm archaeologist archaeologist index --root /repo
+      # (fixture/test repos like testdata/ or fixtures/ are OUT of scope here
+      # by policy: fixtures are test data, not runtime data.)
+    # The image's CMD is the CLI ("archaeologist" -> help). Invoke commands
+    # explicitly, e.g.:
+    #   docker compose run --rm archaeologist archaeologist init --root /repo
+    #   docker compose run --rm archaeologist archaeologist index --root /repo
+
+  # --- optional webapp service (uncomment when webapp/ build lands) ---------
+  # PLACEHOLDER ONLY: the webapp may not exist in buildable form yet. Do NOT
+  # wire a production nginx config here before the webapp build artifacts
+  # (dist/) are proven; the block below is a template with a placeholder.
+  #
+  # webapp:
+  #   build:
+  #     context: ./webapp          # requires webapp/ Dockerfile + build output
+  #     dockerfile: Dockerfile
+  #   image: archaeologist-webapp:latest
+  #   depends_on:
+  #     - archaeologist
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - webapp-dist:/usr/share/nginx/html   # template only — verify against
+  #                                           # the actual webapp build
+  #
+  # volumes:
+  #   webapp-dist:
+
+volumes:
+  db-data:
+  arch-data:
