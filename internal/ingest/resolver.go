@@ -123,6 +123,18 @@ type index struct {
 // place where references become edges, and it is deterministic: given the
 // same input, the same edges are produced.
 func Build(manifest ParserManifest, commit, branch string) Resolved {
+	// A full build: every file is both parsed and context.
+	return BuildFacts(manifest.Files, manifest.Files, commit, branch)
+}
+
+// BuildFacts resolves a split fact set:
+//   - parsedFiles contribute file/symbol/edge facts (a fresh parse);
+//   - contextFiles contribute resolution data only (exports, symbol
+//     tables) so cross-file references resolve, but emit no new facts —
+//     the caller carries their facts over from a previous index run.
+//
+// Both lists may be the same slice (full build).
+func BuildFacts(parsedFiles, contextFiles []ParserFile, commit, branch string) Resolved {
 	out := Resolved{
 		Symbols: []store.Symbol{},
 		Edges:   []store.Edge{},
@@ -137,30 +149,37 @@ func Build(manifest ParserManifest, commit, branch string) Resolved {
 		byID:    map[string]store.Symbol{},
 	}
 
-	// First pass: index every file and its exported surface.
-	for i := range manifest.Files {
-		f := &manifest.Files[i]
-		idx.files[f.Path] = f
-		idx.byPath[f.Path] = f
-		exportMap := map[string][]string{}
-		for _, n := range f.ExportedNames {
-			for _, s := range f.Symbols {
-				if s.Name == n && s.Kind != "module" && s.Kind != "package" {
-					exportMap[n] = append(exportMap[n], s.ID)
+	// First pass: index every file (parsed + context) and its exported
+	// surface. Resolution needs the whole world; facts only come from the
+	// parsed set.
+	seenPath := map[string]bool{}
+	for _, list := range [][]ParserFile{parsedFiles, contextFiles} {
+		for i := range list {
+			f := &list[i]
+			if seenPath[f.Path] {
+				continue
+			}
+			seenPath[f.Path] = true
+			idx.files[f.Path] = f
+			idx.byPath[f.Path] = f
+			exportMap := map[string][]string{}
+			for _, n := range f.ExportedNames {
+				for _, s := range f.Symbols {
+					if s.Name == n && s.Kind != "module" && s.Kind != "package" {
+						exportMap[n] = append(exportMap[n], s.ID)
+					}
 				}
 			}
+			idx.exports[f.Path] = exportMap
 		}
-		idx.exports[f.Path] = exportMap
 	}
 
-	// Second pass: build Go package index. Go import paths resolve to a
-	// directory under the module root; find the nearest file in that
-	// directory that declares the expected package.
-	buildGoPackageIndex(manifest, idx)
+	// Second pass: build Go package index over the whole world.
+	buildGoPackageIndexFiles(append(append([]ParserFile{}, parsedFiles...), contextFiles...), idx)
 
-	// Per-file symbol + edge emission.
-	for i := range manifest.Files {
-		f := &manifest.Files[i]
+	// Per-file symbol + edge emission: parsed files only.
+	for i := range parsedFiles {
+		f := &parsedFiles[i]
 
 		module := moduleForPath(f.Path)
 
@@ -284,12 +303,13 @@ func moduleForPath(p string) string {
 	return parts[0]
 }
 
-// buildGoPackageIndex maps Go import paths to the nearest source file.
-func buildGoPackageIndex(m ParserManifest, idx *index) {
+// buildGoPackageIndexFiles maps Go import paths to the nearest source file
+// across a list of files (parsed + context).
+func buildGoPackageIndexFiles(files []ParserFile, idx *index) {
 	// Group files by their Go package directory.
 	dirPkgs := map[string]*ParserFile{}
-	for i := range m.Files {
-		f := &m.Files[i]
+	for i := range files {
+		f := &files[i]
 		if f.Language != "go" {
 			continue
 		}
@@ -314,8 +334,8 @@ func buildGoPackageIndex(m ParserManifest, idx *index) {
 	}
 	sort.Strings(candidates)
 
-	for i := range m.Files {
-		f := &m.Files[i]
+	for i := range files {
+		f := &files[i]
 		if f.Language != "go" {
 			continue
 		}
@@ -347,6 +367,25 @@ func matchGoImport(spec string, dirPkgs map[string]*ParserFile, candidates []str
 	return nil, false
 }
 
+// importHint is the persisted display form of an import fact: the parser's
+// own hint when it set one, else the source spec as written. The value is
+// the observed source expression, never an inference.
+func importHint(imp PImport) string {
+	if imp.Hint != "" {
+		return imp.Hint
+	}
+	return imp.Spec
+}
+
+// callHint is the persisted display form of a call fact: the parser's hint
+// when set, else the target expression as written.
+func callHint(c PCall) string {
+	if c.Hint != "" {
+		return c.Hint
+	}
+	return c.Target
+}
+
 // ---------------------------------------------------------------------------
 // Import resolution
 // ---------------------------------------------------------------------------
@@ -375,17 +414,18 @@ func resolveGoImports(f *ParserFile, idx *index, commit string) []store.Edge {
 
 	for _, imp := range f.Imports {
 		// Go import spec is an absolute package path.
+		hint := importHint(imp)
 		target, ok := idx.goPkgs[imp.Spec]
 		if !ok {
 			// Unresolved: external package or out-of-index module.
 			out = append(out, store.Edge{
-				ID:          edgeID("IMPORTS", from, imp.Hint, f.Path, imp.Line),
+				ID:          edgeID("IMPORTS", from, hint, f.Path, imp.Line),
 				FromID:      from,
 				ToID:        "",
 				Kind:        "IMPORTS",
 				Resolved:    false,
 				Confidence:  "unresolved",
-				TargetHint:  imp.Hint,
+				TargetHint:  hint,
 				SourceFile:  f.Path,
 				SourceLine:  imp.Line,
 			})
@@ -403,13 +443,13 @@ func resolveGoImports(f *ParserFile, idx *index, commit string) []store.Edge {
 			toID = target.Symbols[0].ID
 		}
 		out = append(out, store.Edge{
-			ID:         edgeID("IMPORTS", from, imp.Hint, f.Path, imp.Line),
+			ID:         edgeID("IMPORTS", from, hint, f.Path, imp.Line),
 			FromID:     from,
 			ToID:       toID,
 			Kind:       "IMPORTS",
 			Resolved:   true,
 			Confidence: "static",
-			TargetHint: imp.Hint,
+			TargetHint: hint,
 			SourceFile: f.Path,
 			SourceLine: imp.Line,
 		})
@@ -423,16 +463,17 @@ func resolveJSImports(f *ParserFile, idx *index, commit string) []store.Edge {
 	from := moduleID(f)
 
 	for _, imp := range f.Imports {
+		hint := importHint(imp)
 		targetPath, resolved := resolveJSSpecifier(f, imp.Spec, idx)
 		if !resolved {
 			out = append(out, store.Edge{
-				ID:         edgeID("IMPORTS", from, imp.Hint, f.Path, imp.Line),
+				ID:         edgeID("IMPORTS", from, hint, f.Path, imp.Line),
 				FromID:     from,
 				ToID:       "",
 				Kind:       "IMPORTS",
 				Resolved:   false,
 				Confidence: "unresolved",
-				TargetHint: imp.Hint,
+				TargetHint: hint,
 				SourceFile: f.Path,
 				SourceLine: imp.Line,
 			})
@@ -449,13 +490,13 @@ func resolveJSImports(f *ParserFile, idx *index, commit string) []store.Edge {
 			}
 		}
 		out = append(out, store.Edge{
-			ID:         edgeID("IMPORTS", from, imp.Hint, f.Path, imp.Line),
+			ID:         edgeID("IMPORTS", from, hint, f.Path, imp.Line),
 			FromID:     from,
 			ToID:       toID,
 			Kind:       "IMPORTS",
 			Resolved:   true,
 			Confidence: "static",
-			TargetHint: imp.Hint,
+			TargetHint: hint,
 			SourceFile: f.Path,
 			SourceLine: imp.Line,
 		})
@@ -548,6 +589,7 @@ func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 
 	for _, c := range f.Calls {
 		from := c.From
+		hint := callHint(c)
 		if from == "" {
 			from = moduleID(f)
 		}
@@ -564,13 +606,13 @@ func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 			// Not an import binding: a local or dynamic reference. Emit
 			// unresolved so we never invent a target.
 			out = append(out, store.Edge{
-				ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+				ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 				FromID:     from,
 				ToID:       "",
 				Kind:       "CALLS",
 				Resolved:   false,
 				Confidence: "unresolved",
-				TargetHint: c.Hint,
+				TargetHint: hint,
 				SourceFile: f.Path,
 				SourceLine: c.Line,
 			})
@@ -587,13 +629,13 @@ func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 				// Resolve to the first matching exported symbol.
 				toID := ids[0]
 				out = append(out, store.Edge{
-					ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+					ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 					FromID:     from,
 					ToID:       toID,
 					Kind:       "CALLS",
 					Resolved:   true,
 					Confidence: "static",
-					TargetHint: c.Hint,
+					TargetHint: hint,
 					SourceFile: f.Path,
 					SourceLine: c.Line,
 				})
@@ -603,13 +645,13 @@ func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 		// Target symbol not found in the target file's exported surface:
 		// leave unresolved rather than guess.
 		out = append(out, store.Edge{
-			ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+			ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 			FromID:     from,
 			ToID:       "",
 			Kind:       "CALLS",
 			Resolved:   false,
 			Confidence: "unresolved",
-			TargetHint: c.Hint,
+			TargetHint: hint,
 			SourceFile: f.Path,
 			SourceLine: c.Line,
 		})
@@ -635,6 +677,7 @@ func resolveGoCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 
 	for _, c := range f.Calls {
 		from := c.From
+		hint := callHint(c)
 		if from == "" {
 			from = moduleID(f)
 		}
@@ -648,13 +691,13 @@ func resolveGoCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 		target, ok := alias[base]
 		if !ok {
 			out = append(out, store.Edge{
-				ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+				ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 				FromID:     from,
 				ToID:       "",
 				Kind:       "CALLS",
 				Resolved:   false,
 				Confidence: "unresolved",
-				TargetHint: c.Hint,
+				TargetHint: hint,
 				SourceFile: f.Path,
 				SourceLine: c.Line,
 			})
@@ -678,26 +721,26 @@ func resolveGoCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 		}
 		if toID == "" {
 			out = append(out, store.Edge{
-				ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+				ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 				FromID:     from,
 				ToID:       "",
 				Kind:       "CALLS",
 				Resolved:   false,
 				Confidence: "unresolved",
-				TargetHint: c.Hint,
+				TargetHint: hint,
 				SourceFile: f.Path,
 				SourceLine: c.Line,
 			})
 			continue
 		}
 		out = append(out, store.Edge{
-			ID:         edgeID("CALLS", from, c.Hint, f.Path, c.Line),
+			ID:         edgeID("CALLS", from, hint, f.Path, c.Line),
 			FromID:     from,
 			ToID:       toID,
 			Kind:       "CALLS",
 			Resolved:   true,
 			Confidence: "static",
-			TargetHint: c.Hint,
+			TargetHint: hint,
 			SourceFile: f.Path,
 			SourceLine: c.Line,
 		})
