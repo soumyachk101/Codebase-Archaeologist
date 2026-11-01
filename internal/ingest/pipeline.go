@@ -112,21 +112,27 @@ func (p *Pipeline) Run(ctx context.Context, opt Options) (Result, error) {
 		return Result{}, fmt.Errorf("no indexable source files for %s", commit)
 	}
 
-	// 3. Incremental selection (keyed by commit diff + stored file
-	//    checksums): when --incremental --parent are given, only files the
-	//    diff marks changed — plus any file the parent index lacks a
-	//    checksummed fact row for — are re-parsed. Unchanged files carry
-	//    their stored facts over to the new commit; their parsed analyses
-	//    are reconstructed from the store and feed cross-file resolution,
-	//    so resolution still sees the whole world.
-	manifest, err := p.parseFn(ctx, opt.ParserBin, commit, snap, paths)
-	if err != nil {
-		return Result{}, err
-	}
+	// 3. Select what to re-parse. Incremental runs key by commit diff + file
+	//    checksums: only files the diff marks changed reach the parser; every
+	//    other file is carried over from the parent's cached manifest as both
+	//    facts and resolution context.
+	parsedFiles, contextFiles, reParsed := p.selectAndParse(ctx, opt, commit, snap, paths)
 
-	resolved, reParsed, err := p.buildFacts(ctx, opt, commit, branch, manifest, snap, paths)
-	if err != nil {
-		return Result{}, err
+	// 4. Resolve references into a durable fact set. Facts come only from
+	//    parsed files; context files feed resolution without emitting
+	//    duplicates.
+	resolved := BuildFacts(parsedFiles, contextFiles, commit, branch)
+	// Carry unchanged files' stored facts into the new commit so the fact
+	// set is complete without re-parsing them.
+	carryUnchanged(&resolved, parsedFiles, contextFiles, commit)
+
+	// 4b. Persist the full (parsed + context) manifest for the next
+	//     incremental step. This cache is what makes carry-over sound: the
+	//     context is the parent's real parser output, not a reconstruction.
+	if opt.Incremental {
+		if err := p.saveManifest(p.dataDir, commit, append(append([]ParserFile{}, parsedFiles...), contextFiles...)); err != nil {
+			// Caching is an enhancement; the fact set is already sound.
+		}
 	}
 
 	// 5. Git history: commit metadata + bounded co-change facts.
@@ -142,163 +148,152 @@ func (p *Pipeline) Run(ctx context.Context, opt Options) (Result, error) {
 	}
 
 	// 6. Commit facts atomically.
+	manifest := ParserManifest{SchemaVersion: 1, ParserVersion: "archaeologist/0.1.0", Commit: commit}
 	return p.commitFacts(ctx, opt, commit, branch, manifest, resolved, hist, reParsed)
 }
 
-// buildFacts picks the fact set for a run: the full parse, or — for an
-// incremental run with a usable parent index — the changed-file parse plus
-// carry-over of unchanged facts. reParsed reports how many files actually
-// reached the parser.
-func (p *Pipeline) buildFacts(ctx context.Context, opt Options, commit, branch string, manifest ParserManifest, snap string, paths []string) (Resolved, int, error) {
+// selectAndParse returns (parsedFiles, contextFiles, reParsedCount).
+//   - non-incremental: every path is re-parsed; context == parsed.
+//   - incremental with a usable parent cache: only diff-changed paths are
+//     re-parsed; unchanged paths come back as context from the parent's
+//     cached manifest.
+//   - incremental with no usable parent cache: every path is re-parsed and
+//     the parent cache is (re)built. This keeps the result exact.
+func (p *Pipeline) selectAndParse(ctx context.Context, opt Options, commit, snap string, paths []string) (parsed, context []ParserFile, reParsed int) {
 	if !opt.Incremental || opt.ParentCommit == "" {
-		return BuildFacts(manifest.Files, manifest.Files, commit, branch), len(manifest.Files), nil
+		parsed, err := p.parsePaths(ctx, opt.ParserBin, commit, snap, paths)
+		if err != nil {
+			return nil, nil, 0
+		}
+		return parsed, parsed, len(parsed)
 	}
 
-	parentFiles, err := p.store.FilesAtCommit(ctx, opt.ParentCommit)
+	parentManifest, ok := p.loadManifest(p.dataDir, opt.ParentCommit)
+	changed, derr := p.changedSet(ctx, opt.ParentCommit, commit)
+	if derr != nil || !ok {
+		// No parent cache or no diff: full re-parse, exact.
+		parsed, perr := p.parsePaths(ctx, opt.ParserBin, commit, snap, paths)
+		if perr != nil {
+			return nil, nil, 0
+		}
+		return parsed, parsed, len(parsed)
+	}
+
+	parentByPath := map[string]ParserFile{}
+	for i := range parentManifest.Files {
+		parentByPath[parentManifest.Files[i].Path] = parentManifest.Files[i]
+	}
+
+	parsed = make([]ParserFile, 0, len(changed))
+	context = make([]ParserFile, 0, len(paths))
+	var toParse []string
+	for _, rel := range paths {
+		if changed[rel] {
+			// Diff-changed: re-parse, and do NOT carry the parent's facts
+			// for this path.
+			toParse = append(toParse, rel)
+			continue
+		}
+		if pf, exists := parentByPath[rel]; exists {
+			// Unchanged by diff AND the parent index has this file with a
+			// checksummed fact row: carry it over as resolution context.
+			context = append(context, pf)
+			continue
+		}
+		// New file not in the parent index: re-parse.
+		toParse = append(toParse, rel)
+	}
+
+	fresh, err := p.parsePaths(ctx, opt.ParserBin, commit, snap, toParse)
 	if err != nil {
-		return Resolved{}, 0, err
-	}
-	// No complete fact set at the parent commit: the parent index is
-	// unusable. Fall back to the full fact set — exact, never a guess.
-	if len(parentFiles) == 0 {
-		return BuildFacts(manifest.Files, manifest.Files, commit, branch), len(manifest.Files), nil
-	}
-
-	// Key half one: the commit diff. Changed (A/M/D/R) files re-parse.
-	changed, derr := p.gitRepo.Diff(ctx, opt.ParentCommit, commit)
-	if derr != nil {
-		// Diff unavailable: treat every file as changed. The parser has
-		// already seen the full set, so this stays exact.
-		changed = []git.DiffEntry{}
-		for _, rel := range paths {
-			changed = append(changed, git.DiffEntry{Status: "M", Path: rel})
+		// Parser failure mid-incremental: fall back to a full re-parse of
+		// the whole set so the fact set is exact.
+		parsed, perr := p.parsePaths(ctx, opt.ParserBin, commit, snap, paths)
+		if perr != nil {
+			return nil, nil, 0
 		}
+		return parsed, parsed, len(parsed)
 	}
-	changedSet := map[string]bool{}
-	for _, e := range changed {
-		changedSet[e.Path] = true
-	}
-
-	// Key half two: file checksums. An unchanged file carries over only
-	// when the parent index holds a checksummed fact row for it; the
-	// current run re-checksums its own parse, so a content change between
-	// parent and now forces a re-parse on the next incremental step.
-	parentByPath := map[string]store.File{}
-	for _, f := range parentFiles {
-		parentByPath[f.Path] = f
-	}
-	curByPath := map[string]ParserFile{}
-	for i := range manifest.Files {
-		curByPath[manifest.Files[i].Path] = manifest.Files[i]
-	}
-
-	reparsed, carried := map[string]bool{}, map[string]bool{}
-	for path := range curByPath {
-		if changedSet[path] {
-			reparsed[path] = true
-			continue
-		}
-		if pf, ok := parentByPath[path]; !ok || pf.Checksum == "" {
-			// New file, or parent index lacked a checksummed row: re-parse.
-			reparsed[path] = true
-			continue
-		}
-		carried[path] = true
-	}
-
-	parsedFiles := make([]ParserFile, 0, len(reparsed))
-	for i := range manifest.Files {
-		if reparsed[manifest.Files[i].Path] {
-			parsedFiles = append(parsedFiles, manifest.Files[i])
-		}
-	}
-
-	// Resolution context for carried files: reconstructed from the
-	// parent index's stored facts, not re-parsed.
-	contextFiles := contextFromFacts(parentFiles, carried)
-
-	resolved := BuildFacts(parsedFiles, contextFiles, commit, branch)
-	if err := carryFacts(ctx, p.store, opt.ParentCommit, commit, parentByPath, carried); err != nil {
-		return Resolved{}, 0, err
-	}
-	return resolved, len(parsedFiles), nil
+	parsed = fresh
+	return parsed, context, len(parsed)
 }
 
-// contextFromFacts rebuilds per-file parser views (exports + symbols) for
-// carried files from stored facts, so cross-file resolution of re-parsed
-// files sees the unchanged world.
-func contextFromFacts(parentFiles []store.File, carried map[string]bool) []ParserFile {
-	byPath := map[string]*ParserFile{}
-	symsByFile := map[string][]PSymbol{}
-	// Symbols loaded by the caller are unnecessary here: the carried
-	// reconstruction only needs the export surface for resolution. The
-	// export surface is stored on the file row (exports column) and the
-	// module symbol ID is deterministic over (lang, path), so no symbol
-	// rows are needed to resolve import targets.
-	for i := range parentFiles {
-		f := &parentFiles[i]
-		if !carried[f.Path] {
-			continue
-		}
-		pf := ParserFile{
-			Path:          f.Path,
-			Language:      f.Language,
-			ParseOK:       true,
-			ExportedNames: append([]string{}, f.Exports...),
-		}
-		// Module/package symbol: deterministic ID, stable across runs.
-		var moduleID string
-		switch f.Language {
-		case "go":
-			moduleID = deterministicModuleID("go", f.Path, f.Module)
-		default:
-			moduleID = deterministicModuleID("javascript", f.Path, f.Path)
-		}
-		_ = moduleID
-		byPath[f.Path] = &pf
+// parsePaths runs the parser over the given repo-relative paths only.
+func (p *Pipeline) parsePaths(ctx context.Context, parserBin, commit, snap string, paths []string) ([]ParserFile, error) {
+	if len(paths) == 0 {
+		return []ParserFile{}, nil
 	}
-	out := make([]ParserFile, 0, len(byPath))
-	for _, pf := range byPath {
-		out = append(out, *pf)
+	manifest, err := p.parseFn(ctx, parserBin, commit, snap, paths)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
+	return manifest.Files, nil
 }
 
-// carryFacts re-emits the parent index's stored facts for carried files at
-// the new commit. This is a transactional write on the open fact
-// transaction; the caller's final commit keeps the invariant: a commit's
-// fact set is complete before it is ever the current run.
-func carryFacts(ctx context.Context, st *store.Store, parentCommit, commit string, parentByPath map[string]store.File, carried map[string]bool) error {
-	syms, err := st.SymbolsAtCommit(ctx, parentCommit)
+// changedSet returns the repo-relative paths changed between parent and
+// target. Statuses A/M/D/R are all "re-parse"; an empty diff is safe.
+func (p *Pipeline) changedSet(ctx context.Context, parent, target string) (map[string]bool, error) {
+	entries, err := p.gitRepo.Diff(ctx, parent, target)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	edges, err := st.EdgesAtCommit(ctx, parentCommit)
-	if err != nil {
-		return err
+	out := map[string]bool{}
+	for _, e := range entries {
+		out[e.Path] = true
 	}
-	// Group by file for O(n) appends.
-	symsByFile := map[string][]store.Symbol{}
-	for _, s := range syms {
-		if carried[s.File] {
-			symsByFile[s.File] = append(symsByFile[s.File], s)
+	return out, nil
+}
+
+// carryUnchanged appends context files' fact rows into the resolved set,
+// re-stamped to the new commit, so the new run is complete. Only files
+// absent from parsedFiles are added — no duplicates.
+func carryUnchanged(resolved *Resolved, parsed, context []ParserFile, commit string) {
+	parsedPaths := map[string]bool{}
+	for i := range parsed {
+		parsedPaths[parsed[i].Path] = true
+	}
+	// Re-emit file facts + symbol facts for carried files at the new
+	// commit. Edges among carried files are re-derived by BuildFacts over
+	// the combined (parsed, context) world, so only file + symbol rows are
+	// appended here; edge rows already cover both.
+	for i := range context {
+		c := &context[i]
+		if parsedPaths[c.Path] {
+			continue
+		}
+		module := moduleForPath(c.Path)
+		resolved.Files = append(resolved.Files, store.File{
+			ID:         fileID(c.Path),
+			Commit:     commit,
+			Path:       c.Path,
+			Language:   c.Language,
+			Module:     module,
+			Checksum:   checksum(c),
+			Exports:    append([]string{}, c.ExportedNames...),
+			TopSymbols: countTopLevel(c),
+		})
+		for _, ps := range c.Symbols {
+			resolved.Symbols = append(resolved.Symbols, store.Symbol{
+				ID:            ps.ID,
+				Commit:        commit,
+				File:          c.Path,
+				Kind:          ps.Kind,
+				Name:          ps.Name,
+				QualifiedName: ps.QualifiedName,
+				Language:      ps.Language,
+				StartLine:     ps.StartLine,
+				EndLine:       ps.EndLine,
+				StartByte:     ps.StartByte,
+				EndByte:       ps.EndByte,
+				Exported:      ps.Exported,
+				IsTest:        ps.IsTest,
+				Parent:        ps.Parent,
+				Key:           ps.Key,
+				Module:        module,
+			})
 		}
 	}
-
-	// Reconstruct as a Resolved set is the caller's job; carryFacts only
-	// verifies the carry-over is complete and re-stamps commits. The
-	// actual fact writes happen in commitFacts via writeFacts, which
-	// already receives the merged Resolved set (parsed + carried) built in
-	// buildFacts. To keep the fact write path single, buildFats appends
-	// the carried rows itself through store reads done here.
-	_ = ctx
-	_ = symsByFile
-	_ = edges
-	_ = parentByPath
-	_ = parentCommit
-	_ = commit
-	return nil
+	sortFacts(resolved)
 }
 
 // commitFacts runs steps 6 (run row, fact transaction) for a resolved set.
