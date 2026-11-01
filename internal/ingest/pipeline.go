@@ -70,23 +70,17 @@ type Pipeline struct {
 }
 
 // New creates a pipeline. store is the data layer, dir the git work tree,
-// dataDir where snapshots are kept.
+// dataDir where snapshots and the incremental manifest cache are kept.
 func New(st *store.Store, dir, dataDir string) *Pipeline {
-	return &Pipeline{store: st, gitRepo: &git.Repo{Path: dir}, dataDir: dataDir}
+	p := &Pipeline{store: st, gitRepo: &git.Repo{Path: dir}, dataDir: dataDir}
+	p.parseFn = p.runParser // default: the real tree-sitter subprocess
+	return p
 }
 
 // SetParserRunner overrides the parser invocation (used by tests to observe
-// which file set an incremental run actually re-parses).
+// exactly which file set an incremental run re-parses).
 func (p *Pipeline) SetParserRunner(f func(ctx context.Context, parserBin, commit, snap string, paths []string) (ParserManifest, error)) {
 	p.parseFn = f
-}
-
-// parser returns the active parser runner, defaulting to the real binary.
-func (p *Pipeline) parser() func(ctx context.Context, parserBin, commit, snap string, paths []string) (ParserManifest, error) {
-	if p.parseFn != nil {
-		return p.parseFn
-	}
-	return p.runParser
 }
 
 // Run executes the full pipeline and returns a summary. It is transactional:
@@ -121,20 +115,24 @@ func (p *Pipeline) Run(ctx context.Context, opt Options) (Result, error) {
 		return Result{}, selErr
 	}
 
-	// 4. Facts. The changed set resolves against the whole world (changed +
-	//    carried) so cross-file references still resolve; the carried set
-	//    is self-contained. The two sets' source files are disjoint, so no
-	//    edge is emitted twice.
-	full := concatFiles(parsedFiles, carriedFiles)
-	changedFacts := BuildFacts(parsedFiles, full, commit, branch)
+	// 4. Facts. The parsed (changed) set resolves against the whole world
+	//    (changed + carried) so cross-file references still resolve; the
+	//    carried set is built self-contained and re-stamped to the new
+	//    commit. Source-file sets are disjoint, so no fact is written
+	//    twice. Carry is pure: it re-derives the carried file's facts from
+	//    its cached parser output — no store read, nothing invented.
+	world := concatFiles(parsedFiles, carriedFiles)
+	changedFacts := BuildFacts(parsedFiles, world, commit, branch)
 	carriedFacts := BuildFacts(carriedFiles, carriedFiles, commit, branch)
 	resolved := mergeResolved(changedFacts, carriedFacts)
 
-	// 4b. Persist the full (parsed + carried) manifest for the next
+	// 4b. Persist the full (changed + carried) manifest for the next
 	//     incremental step. This cache makes carry-over sound: context is
 	//     the parent's real parser output, not a reconstruction.
 	if opt.Incremental {
-		_ = p.saveManifest(p.dataDir, commit, full) // enhancement; not fatal
+		if err := p.saveManifest(p.dataDir, commit, world); err != nil {
+			// Caching is an enhancement; the fact set is already sound.
+		}
 	}
 
 	// 5. Git history: commit metadata + bounded co-change facts.
@@ -344,89 +342,6 @@ func (p *Pipeline) commitFacts(ctx context.Context, opt Options, commit, branch 
 		ReParsed:     reParsed,
 	}, nil
 }
-
-// changedFiles returns the repo-relative paths that differ between parent and
-// target commit. When the diff is unavailable the caller falls back to a
-// full re-parse; the diff itself is the key, not a checksum of the diff.
-func (p *Pipeline) changedFiles(ctx context.Context, parent, target string) (map[string]bool, error) {
-	entries, err := p.gitRepo.Diff(ctx, parent, target)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]bool{}
-	for _, e := range entries {
-		out[e.Path] = true
-	}
-	return out, nil
-}
-
-// parentFacts loads the parent commit's complete run and its parsed-file
-// data (the manifest content, i.e. symbols/imports/calls) so unchanged files
-// can be carried over. Returns the parent manifest and whether a usable
-// parent index exists.
-func (p *Pipeline) parentFacts(ctx context.Context, repoID, parentCommit string) (ParserManifest, bool, error) {
-	run, err := p.store.GetCurrentRun(ctx, repoID)
-	if err != nil {
-		return ParserManifest{}, false, err
-	}
-	// The parent run must be at parentCommit; otherwise the parent index we
-	// need does not exist and the caller does a full re-index.
-	if run.Commit != parentCommit {
-		runs, rerr := p.store.ListRuns(ctx, repoID, 200)
-		if rerr != nil {
-			return ParserManifest{}, false, rerr
-		}
-		found := false
-		for _, r := range runs {
-			if r.Commit == parentCommit {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return ParserManifest{}, false, nil // not indexed: full re-index
-		}
-	}
-	files, err := p.store.FilesAtCommit(ctx, parentCommit)
-	if err != nil {
-		return ParserManifest{}, false, err
-	}
-	syms, err := p.store.SymbolsAtCommit(ctx, parentCommit)
-	if err != nil {
-		return ParserManifest{}, false, err
-	}
-	edges, err := p.store.EdgesAtCommit(ctx, parentCommit)
-	if err != nil {
-		return ParserManifest{}, false, err
-	}
-	// Rebuild the parent's per-file parser views from the stored facts. The
-	// checksum on each file row is the parent's fact checksum; it is what
-	// keyed the parent index and is the "file checksum" half of the
-	// incremental key (commit diff + file checksums).
-	_ = files
-	_ = syms
-	_ = edges
-	// Rebuilding ParserFile structs from store facts is out of scope for the
-	// carry-over path: instead, carry the *stored facts* directly. The
-	// manifest returned here is only used for its File/Symbol/Edge views.
-	// For unchanged files, BuildFacts will not re-emit them; mergeCarried
-	// inserts the stored facts verbatim. So the "parentFacts" manifest is a
-	// thin wrapper around the stored facts:
-	pm := ParserManifest{
-		SchemaVersion: 1,
-		ParserVersion: "carried",
-		Commit:        parentCommit,
-	}
-	// The stored facts are carried in commitFacts via mergeCarried; they
-	// are reachable through the store, not through this manifest. This
-	// manifest is a marker.
-	return pm, true, nil
-}
-
-// parentFactsManifest converts the marker manifest into the actual carry-over
-// facts. It is kept as a named step so tests can observe what is carried.
-func parentFactsMarker(pm ParserManifest) ParserManifest { return pm }
-
 
 // resolveCommit picks the target commit and branch.
 func (p *Pipeline) resolveCommit(ctx context.Context, opt Options) (string, string, error) {
