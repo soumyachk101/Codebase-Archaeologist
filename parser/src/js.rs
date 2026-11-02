@@ -108,106 +108,28 @@ fn collect_symbols(
     let mut cursor = node.walk();
     for c in node.named_children(&mut cursor) {
         match c.kind() {
-            "function_declaration" | "generator_function_declaration" => {
-                let name = c
-                    .child_by_field_name("name")
-                    .and_then(|n| text(content, n))
-                    .unwrap_or_default();
-                if name.is_empty() {
-                    continue;
-                }
-                let qn = join(enclosing, &name);
-                let exported = parent_is_exported(c.parent());
-                let is_test = path_is_test(path) || name.contains("test");
-                push_symbol(out, c, content, path, lang, "function", &name, &qn, exported, is_test, enclosing);
-                with_scope(enclosing, &name, |scope| collect_symbols(c, content, path, lang, scope, out, ts));
-            }
-            "class_declaration" => {
-                let name = c
-                    .child_by_field_name("name")
-                    .and_then(|n| text(content, n))
-                    .unwrap_or_default();
-                if name.is_empty() {
-                    continue;
-                }
-                let qn = join(enclosing, &name);
-                let exported = parent_is_exported(c.parent());
-                push_symbol(out, c, content, path, lang, "class", &name, &qn, exported, path_is_test(path), enclosing);
-                {
-                    let mut ccur = c.walk();
-                    for block in c.named_children(&mut ccur).filter(|n| n.kind() == "statement_block") {
-                        let mut bcur = block.walk();
-                        for m in block.named_children(&mut bcur) {
-                            if m.kind() != "method_definition" {
-                                continue;
-                            }
-                            let mn = m
-                                .child_by_field_name("name")
-                                .and_then(|n| text(content, n))
-                                .unwrap_or_default();
-                            if mn.is_empty() {
-                                continue;
-                            }
-                            let mq = format!("{qn}.{mn}");
-                            let is_test = path_is_test(path) || mn.contains("test");
-                            let single = vec![qn.clone()];
-                            push_symbol(out, m, content, path, lang, "method", &mn, &mq, false, is_test, &single);
-                            collect_symbols(m, content, path, lang, &[qn.clone()], out, ts);
-                        }
-                    }
-                }
-            }
-            "variable_declaration" => {
-                let is_const = c.child(0).map(|n| n.kind() == "const").unwrap_or(false);
-                let exported = parent_is_exported(c.parent());
-                {
-                    let mut vcur = c.walk();
-                    for vd in c.named_children(&mut vcur).filter(|n| n.kind() == "variable_declarator") {
-                        let name = vd
-                            .child_by_field_name("name")
-                            .and_then(|n| text(content, n))
-                            .unwrap_or_default();
-                        if name.is_empty() {
-                            continue;
-                        }
-                        let kind = if is_const { "constant" } else { "variable" };
-                        let qn = join(enclosing, &name);
-                        let is_test = path_is_test(path) || name.contains("test");
-                        push_symbol(out, vd, content, path, lang, kind, &name, &qn, exported, is_test, enclosing);
-                        if let Some(v) = vd.child_by_field_name("value") {
-                            if v.kind() == "arrow_function" || v.kind() == "function" {
-                                with_scope(enclosing, &name, |scope| {
-                                    collect_symbols(v, content, path, lang, scope, out, ts);
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            "interface_declaration" | "type_alias_declaration" if ts => {
-                let name = c
-                    .child_by_field_name("name")
-                    .and_then(|n| text(content, n))
-                    .unwrap_or_default();
-                if name.is_empty() {
-                    continue;
-                }
-                let kind = if c.kind() == "interface_declaration" { "interface" } else { "type" };
-                let qn = join(enclosing, &name);
-                let exported = parent_is_exported(c.parent());
-                push_symbol(out, c, content, path, lang, kind, &name, &qn, exported, false, enclosing);
+            "function_declaration" | "generator_function_declaration"
+            | "class_declaration"
+            | "variable_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration" => {
+                emit_declaration(c, content, path, lang, enclosing, out, ts);
             }
             "export_statement" => {
+                // The declared symbol is the export_statement's child, not a
+                // child-of-a-child: emit each declaration child directly.
                 let mut ecur = c.walk();
                 for d in c.named_children(&mut ecur) {
-                    if matches!(
-                        d.kind(),
+                    match d.kind() {
                         "function_declaration"
-                            | "generator_function_declaration"
-                            | "class_declaration"
-                            | "variable_declaration"
-                    ) {
-                        collect_symbols(d, content, path, lang, enclosing, out, ts);
+                        | "generator_function_declaration"
+                        | "class_declaration"
+                        | "variable_declaration"
+                        | "interface_declaration"
+                        | "type_alias_declaration" => {
+                            emit_declaration(d, content, path, lang, enclosing, out, ts);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -217,6 +139,112 @@ fn collect_symbols(
             }
             _ => {}
         }
+    }
+}
+
+/// Emit a single declaration node (function/class/variable/interface/type)
+/// as a symbol and recurse into its body for nested symbols. Used for both
+/// top-level declarations and declarations wrapped in `export_statement`.
+fn emit_declaration(
+    c: Node<'_>,
+    content: &str,
+    path: &str,
+    lang: &str,
+    enclosing: &[String],
+    out: &mut Vec<Symbol>,
+    ts: bool,
+) {
+    let exported = parent_is_exported(c.parent());
+    match c.kind() {
+        "function_declaration" | "generator_function_declaration" => {
+            let name = c
+                .child_by_field_name("name")
+                .and_then(|n| text(content, n))
+                .unwrap_or_default();
+            if name.is_empty() {
+                return;
+            }
+            let qn = join(enclosing, &name);
+            let is_test = path_is_test(path) || name.contains("test");
+            push_symbol(out, c, content, path, lang, "function", &name, &qn, exported, is_test, enclosing);
+            with_scope(enclosing, &name, |scope| collect_symbols(c, content, path, lang, scope, out, ts));
+        }
+        "class_declaration" => {
+            let name = c
+                .child_by_field_name("name")
+                .and_then(|n| text(content, n))
+                .unwrap_or_default();
+            if name.is_empty() {
+                return;
+            }
+            let qn = join(enclosing, &name);
+            push_symbol(out, c, content, path, lang, "class", &name, &qn, exported, path_is_test(path), enclosing);
+            {
+                let mut ccur = c.walk();
+                for block in c.named_children(&mut ccur).filter(|n| n.kind() == "statement_block") {
+                    let mut bcur = block.walk();
+                    for m in block.named_children(&mut bcur) {
+                        if m.kind() != "method_definition" {
+                            continue;
+                        }
+                        let mn = m
+                            .child_by_field_name("name")
+                            .and_then(|n| text(content, n))
+                            .unwrap_or_default();
+                        if mn.is_empty() {
+                            continue;
+                        }
+                        let mq = format!("{qn}.{mn}");
+                        let is_test = path_is_test(path) || mn.contains("test");
+                        let single = vec![qn.clone()];
+                        push_symbol(out, m, content, path, lang, "method", &mn, &mq, false, is_test, &single);
+                        collect_symbols(m, content, path, lang, &[qn.clone()], out, ts);
+                    }
+                }
+            }
+        }
+        "variable_declaration" => {
+            let is_const = c.child(0).map(|n| n.kind() == "const").unwrap_or(false);
+            {
+                let mut vcur = c.walk();
+                for vd in c.named_children(&mut vcur).filter(|n| n.kind() == "variable_declarator") {
+                    let name = vd
+                        .child_by_field_name("name")
+                        .and_then(|n| text(content, n))
+                        .unwrap_or_default();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let kind = if is_const { "constant" } else { "variable" };
+                    let qn = join(enclosing, &name);
+                    let is_test = path_is_test(path) || name.contains("test");
+                    push_symbol(out, vd, content, path, lang, kind, &name, &qn, exported, is_test, enclosing);
+                    if let Some(v) = vd.child_by_field_name("value") {
+                        if v.kind() == "arrow_function" || v.kind() == "function" {
+                            with_scope(enclosing, &name, |scope| {
+                                collect_symbols(v, content, path, lang, scope, out, ts);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        "interface_declaration" | "type_alias_declaration" => {
+            if !ts {
+                return;
+            }
+            let name = c
+                .child_by_field_name("name")
+                .and_then(|n| text(content, n))
+                .unwrap_or_default();
+            if name.is_empty() {
+                return;
+            }
+            let kind = if c.kind() == "interface_declaration" { "interface" } else { "type" };
+            let qn = join(enclosing, &name);
+            push_symbol(out, c, content, path, lang, kind, &name, &qn, exported, false, enclosing);
+        }
+        _ => {}
     }
 }
 
