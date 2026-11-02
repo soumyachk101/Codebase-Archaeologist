@@ -75,7 +75,7 @@ pub fn extract(content: &str, path: &str, ts: bool) -> FileAnalysis {
 
 fn add_module_symbol(syms: &mut Vec<Symbol>, path: &str, lang: &str, module_id: &str) {
     syms.push(Symbol {
-        id: module_id.clone(),
+        id: module_id.to_string(),
         kind: "module".into(),
         name: path.rsplit('/').next().unwrap_or(path).to_string(),
         qualified_name: path.to_string(),
@@ -117,7 +117,7 @@ fn collect_symbols(
                     continue;
                 }
                 let qn = join(enclosing, &name);
-                let exported = c.parent().map(parent_is_exported).unwrap_or(false);
+                let exported = parent_is_exported(c.parent());
                 let is_test = path_is_test(path) || name.contains("test");
                 push_symbol(out, c, content, path, lang, "function", &name, &qn, exported, is_test, enclosing);
                 with_scope(enclosing, &name, |scope| collect_symbols(c, content, path, lang, scope, out, ts));
@@ -131,7 +131,7 @@ fn collect_symbols(
                     continue;
                 }
                 let qn = join(enclosing, &name);
-                let exported = c.parent().map(parent_is_exported).unwrap_or(false);
+                let exported = parent_is_exported(c.parent());
                 push_symbol(out, c, content, path, lang, "class", &name, &qn, exported, path_is_test(path), enclosing);
                 {
                     let mut ccur = c.walk();
@@ -194,7 +194,7 @@ fn collect_symbols(
                 }
                 let kind = if c.kind() == "interface_declaration" { "interface" } else { "type" };
                 let qn = join(enclosing, &name);
-                let exported = c.parent().map(parent_is_exported).unwrap_or(false);
+                let exported = parent_is_exported(c.parent());
                 push_symbol(out, c, content, path, lang, kind, &name, &qn, exported, false, enclosing);
             }
             "export_statement" => {
@@ -231,7 +231,7 @@ fn path_is_test(path: &str) -> bool {
     base.contains(".test.") || base.contains(".spec.") || path.contains("__tests__")
 }
 
-fn parent_is_exported(parent: Option<&Node>) -> bool {
+fn parent_is_exported(parent: Option<Node>) -> bool {
     parent.map(|p| p.kind() == "export_statement").unwrap_or(false)
 }
 
@@ -263,8 +263,8 @@ fn push_symbol(
         qualified_name: qn.into(),
         language: lang.into(),
         file: path.into(),
-        start_line: node.start_position().row + 1,
-        end_line: node.end_position().row + 1,
+        start_line: (node.start_position().row + 1) as u32,
+        end_line: (node.end_position().row + 1) as u32,
         start_byte: node.start_byte() as u32,
         end_byte: node.end_byte() as u32,
         exported,
@@ -284,7 +284,7 @@ fn record_imports(root: Node<'_>, content: &str, fa: &mut FileAnalysis, aliases:
         match c.kind() {
             "import_statement" => {
                 let spec = import_specifier(content, c);
-                let line = c.start_position().row + 1;
+                let line = (c.start_position().row + 1) as u32;
                 let mut bindings: Vec<ImportBinding> = Vec::new();
 
                 if let Some(d) = c.child_by_field_name("default").and_then(|n| text(content, n)) {
@@ -319,7 +319,7 @@ fn record_imports(root: Node<'_>, content: &str, fa: &mut FileAnalysis, aliases:
                     .child_by_field_name("module")
                     .and_then(|m| text(content, m))
                     .unwrap_or_default();
-                let line = c.start_position().row + 1;
+                let line = (c.start_position().row + 1) as u32;
                 fa.imports.push(ImportFact {
                     spec,
                     line,
@@ -394,7 +394,7 @@ fn visit_calls(
             }
             "call_expression" => {
                 if let Some(f) = c.child_by_field_name("function") {
-                    let line = f.start_position().row + 1;
+                    let line = (f.start_position().row + 1) as u32;
                     let from = if enclosing.is_empty() {
                         String::new()
                     } else {
