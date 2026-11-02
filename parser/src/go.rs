@@ -219,7 +219,7 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
     fa
 }
 
-fn go_package_name(root: &Node, content: &str) -> Option<String> {
+fn go_package_name(root: Node<'_>, content: &str) -> Option<String> {
     let mut cursor = root.walk();
     for c in root.named_children(&mut cursor) {
         if c.kind() == "package_clause" {
@@ -233,7 +233,7 @@ fn go_package_name(root: &Node, content: &str) -> Option<String> {
     None
 }
 
-fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
+fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
     // Single-line forms: import "pkg" | import alias "pkg" | import . "pkg"
     // Block form: import ( ... ) with one import_specification per line.
     let mut cursor = node.walk();
@@ -273,7 +273,7 @@ fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
     }
 }
 
-fn record_single_go_import(s: &Node, content: &str, fa: &mut FileAnalysis, line: u32) {
+fn record_single_go_import(s: Node<'_>, content: &str, fa: &mut FileAnalysis, line: u32) {
     let spec = {
         let mut scur = s.walk();
         s.named_children(&mut scur)
@@ -311,7 +311,7 @@ fn is_exported(name: &str) -> bool {
     matches!(chars.next(), Some(c) if c.is_uppercase())
 }
 
-fn param_type_name(node: &Node, content: &str) -> Option<String> {
+fn param_type_name(node: Node<'_>, content: &str) -> Option<String> {
     if let Some(t) = node.child_by_field_name("type") {
         return text(content, &t);
     }
@@ -327,7 +327,7 @@ fn param_type_name(node: &Node, content: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn visit_calls(
-    node: &Node,
+    node: Node<'_>,
     content: &str,
     module_id: &str,
     pkg: &str,
@@ -434,6 +434,6 @@ fn visit_calls(
 // helpers
 // ---------------------------------------------------------------------------
 
-fn text(content: &str, node: &Node) -> Option<String> {
+fn text(content: &str, node: Node<'_>) -> Option<String> {
     node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
