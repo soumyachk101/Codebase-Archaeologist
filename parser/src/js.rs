@@ -97,7 +97,7 @@ fn add_module_symbol(syms: &mut Vec<Symbol>, path: &str, lang: &str, module_id: 
 // ---------------------------------------------------------------------------
 
 fn collect_symbols(
-    node: &Node,
+    node: Node<'_>,
     content: &str,
     path: &str,
     lang: &str,
@@ -245,7 +245,7 @@ fn join(enclosing: &[String], name: &str) -> String {
 
 fn push_symbol(
     out: &mut Vec<Symbol>,
-    node: &Node,
+    node: Node<'_>,
     content: &str,
     path: &str,
     lang: &str,
@@ -279,7 +279,7 @@ fn push_symbol(
 // Imports
 // ---------------------------------------------------------------------------
 
-fn record_imports(root: &Node, content: &str, fa: &mut FileAnalysis, aliases: &mut BTreeSet<(String, String)>) {
+fn record_imports(root: Node<'_>, content: &str, fa: &mut FileAnalysis, aliases: &mut BTreeSet<(String, String)>) {
     for c in walk_all(root) {
         match c.kind() {
             "import_statement" => {
@@ -333,7 +333,7 @@ fn record_imports(root: &Node, content: &str, fa: &mut FileAnalysis, aliases: &m
     }
 }
 
-fn import_specifier(content: &str, node: &Node) -> String {
+fn import_specifier(content: &str, node: Node<'_>) -> String {
     node.child_by_field_name("source")
         .and_then(|s| text(content, s))
         .unwrap_or_default()
@@ -346,7 +346,7 @@ fn import_specifier(content: &str, node: &Node) -> String {
 // ---------------------------------------------------------------------------
 
 fn visit_calls(
-    node: &Node,
+    node: Node<'_>,
     content: &str,
     module_id: &str,
     aliases: &BTreeSet<(String, String)>,
@@ -452,7 +452,7 @@ fn visit_calls(
 // Exports (public surface of the module)
 // ---------------------------------------------------------------------------
 
-fn exported_names(fa: &FileAnalysis, root: &Node, content: &str, ts: bool) -> Vec<String> {
+fn exported_names(fa: &FileAnalysis, root: Node<'_>, content: &str, ts: bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
 
     let mut rcursor = root.walk();
@@ -519,7 +519,7 @@ fn exported_names(fa: &FileAnalysis, root: &Node, content: &str, ts: bool) -> Ve
     out
 }
 
-fn decl_export_name(node: &Node, content: &str) -> Option<String> {
+fn decl_export_name(node: Node<'_>, content: &str) -> Option<String> {
     match node.kind() {
         "function_declaration" | "generator_function_declaration" | "class_declaration" => node
             .child_by_field_name("name")
@@ -539,19 +539,19 @@ fn decl_export_name(node: &Node, content: &str) -> Option<String> {
 // helpers
 // ---------------------------------------------------------------------------
 
-fn text(content: &str, node: &Node) -> Option<String> {
+fn text(content: &str, node: Node<'_>) -> Option<String> {
     node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
 
-fn walk_all<'t>(node: &Node<'t>) -> Vec<Node<'t>> {
-    fn gen<'t>(n: &Node<'t>, out: &mut Vec<Node<'t>>) {
-        let mut cursor = n.walk();
-        for c in n.named_children(&mut cursor) {
+fn walk_all(node: Node<'_>) -> Vec<Node<'_>> {
+    fn gen(node: Node<'_>, out: &mut Vec<Node<'_>>) {
+        let mut cursor = node.walk();
+        for c in node.named_children(&mut cursor) {
             out.push(c);
-            gen(&c, out);
+            gen(c, out);
         }
     }
-    let mut out: Vec<Node<'t>> = Vec::new();
+    let mut out: Vec<Node<'_>> = Vec::new();
     gen(node, &mut out);
     out
 }
