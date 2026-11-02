@@ -75,8 +75,8 @@ func newDependants() *cobra.Command {
 					return err
 				}
 				for _, e := range edges {
-					var from store.Symbol
-					if err := a.store.SymbolAt(ctx, run.Commit, e.FromID); err != nil {
+					from, sErr := a.store.SymbolAt(ctx, run.Commit, e.FromID)
+					if sErr != nil {
 						// FromID can be a file module symbol or synthetic:
 						// show the source fact without inventing a symbol.
 						from = store.Symbol{ID: e.FromID, Name: e.FromID}
