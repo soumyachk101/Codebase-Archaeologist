@@ -233,69 +233,55 @@ fn go_package_name(root: Node<'_>, content: &str) -> Option<String> {
 }
 
 fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
-    // Single-line forms: import "pkg" | import alias "pkg" | import . "pkg"
-    // Block form: import ( ... ) with one import_specification per line.
-    let mut cursor = node.walk();
-    for c in node.named_children(&mut cursor) {
-        match c.kind() {
-            "import_specification" => {
-                record_single_go_import(c, content, fa, (c.start_position().row + 1) as u32);
-            }
-            "string" => {
-                let spec = text(content, c)
-                    .map(|s| s.trim_matches('"').to_string())
-                    .filter(|s| !s.is_empty());
-                if let Some(spec) = spec {
-                    let hint = spec.clone();
-                    fa.imports.push(ImportFact {
-                        spec: spec.clone(),
-                        line: (c.start_position().row + 1) as u32,
-                        dynamic: false,
-                        hint,
-                        bindings: vec![ImportBinding {
-                            local: package_last_segment(&spec),
-                            original: String::new(),
-                        }],
-                    });
-                }
-            }
-            _ => {
-                // import_list: children are import_specification nodes.
-                let mut lcur = c.walk();
-                for s in c.named_children(&mut lcur) {
-                    if s.kind() == "import_specification" {
-                        record_single_go_import(s, content, fa, (s.start_position().row + 1) as u32);
+    // `node` is an import_declaration. Handle both the single-line form
+    // (`import "pkg"` / `import alias "pkg"`) and the block form
+    // (`import ( ... )`) by deep-walking and finding every string-literal
+    // spec. In tree-sitter-go the literal node kind is
+    // `interpreted_string_literal`; each may carry a leading alias child
+    // (`identifier`/`period`/`underscore`) within its enclosing
+    // import_specification (block) or the import_declaration itself.
+    for c in walk_all(node) {
+        if c.kind() != "interpreted_string_literal" {
+            continue;
+        }
+        let spec = match text(content, c).map(|s| s.trim_matches('"').to_string()) {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+        let line = (c.start_position().row + 1) as u32;
+
+        // Alias: the immediate preceding named sibling that is an
+        // identifier/period/underscore, within the same parent.
+        let mut alias: Option<String> = None;
+        if let Some(parent) = c.parent() {
+            let pkind = parent.kind();
+            if pkind == "import_specification" || pkind == "import_declaration" {
+                let mut pcur = parent.walk();
+                let kids: Vec<Node> = parent.named_children(&mut pcur).collect();
+                if let Some(pos) = kids.iter().position(|k| k == c) {
+                    if pos > 0 {
+                        let a = &kids[pos - 1];
+                        if matches!(a.kind(), "identifier" | "period" | "underscore") {
+                            alias = text(content, *a);
+                        }
                     }
                 }
             }
         }
-    }
-}
 
-fn record_single_go_import(s: Node<'_>, content: &str, fa: &mut FileAnalysis, line: u32) {
-    let mut scur = s.walk();
-    let raw = s
-        .named_children(&mut scur)
-        .find(|n| n.kind() == "string")
-        .and_then(|n| text(content, n));
-    let spec = raw.map(|s| s.trim_matches('"').to_string());
-    if let Some(spec) = spec {
-        let mut acur = s.walk();
-        let alias = s
-            .named_children(&mut acur)
-            .find(|n| n.kind() == "identifier" || n.kind() == "period")
-            .and_then(|n| text(content, n));
         let local = match alias {
             Some(a) if a != "." => a,
             _ => package_last_segment(&spec),
         };
-        let hint = spec.clone();
         fa.imports.push(ImportFact {
-            spec,
+            spec: spec.clone(),
             line,
             dynamic: false,
-            hint,
-            bindings: vec![ImportBinding { local, original: String::new() }],
+            hint: spec.clone(),
+            bindings: vec![ImportBinding {
+                local,
+                original: String::new(),
+            }],
         });
     }
 }
@@ -436,4 +422,18 @@ fn visit_calls(
 
 fn text(content: &str, node: Node<'_>) -> Option<String> {
     node.utf8_text(content.as_bytes()).map(str::to_string).ok()
+}
+
+/// Depth-first collection of all named descendants of `node`.
+fn walk_all<'t>(node: Node<'t>) -> Vec<Node<'t>> {
+    fn gen<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
+        let mut cursor = node.walk();
+        for c in node.named_children(&mut cursor) {
+            out.push(c);
+            gen(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    gen(node, &mut out);
+    out
 }
