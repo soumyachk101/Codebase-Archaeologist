@@ -78,8 +78,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                     qualified_name: qn,
                     language: lang.into(),
                     file: path.into(),
-                    start_line: c.start_position().row + 1,
-                    end_line: c.end_position().row + 1,
+                    start_line: (c.start_position().row + 1) as u32,
+                    end_line: (c.end_position().row + 1) as u32,
                     start_byte: c.start_byte() as u32,
                     end_byte: c.end_byte() as u32,
                     exported: is_exported(&name),
@@ -113,8 +113,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                     qualified_name: qn,
                     language: lang.into(),
                     file: path.into(),
-                    start_line: c.start_position().row + 1,
-                    end_line: c.end_position().row + 1,
+                    start_line: (c.start_position().row + 1) as u32,
+                    end_line: (c.end_position().row + 1) as u32,
                     start_byte: c.start_byte() as u32,
                     end_byte: c.end_byte() as u32,
                     exported: is_exported(&name),
@@ -143,8 +143,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                         qualified_name: name.clone(),
                         language: lang.into(),
                         file: path.into(),
-                        start_line: td.start_position().row + 1,
-                        end_line: td.end_position().row + 1,
+                        start_line: (td.start_position().row + 1) as u32,
+                        end_line: (td.end_position().row + 1) as u32,
                         start_byte: td.start_byte() as u32,
                         end_byte: td.end_byte() as u32,
                         exported: is_exported(&name),
@@ -173,8 +173,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                             qualified_name: nm.clone(),
                             language: lang.into(),
                             file: path.into(),
-                            start_line: spec.start_position().row + 1,
-                            end_line: spec.end_position().row + 1,
+                            start_line: (spec.start_position().row + 1) as u32,
+                            end_line: (spec.end_position().row + 1) as u32,
                             start_byte: spec.start_byte() as u32,
                             end_byte: spec.end_byte() as u32,
                             exported: is_exported(&nm),
@@ -240,7 +240,7 @@ fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
     for c in node.named_children(&mut cursor) {
         match c.kind() {
             "import_specification" => {
-                record_single_go_import(c, content, fa, c.start_position().row + 1);
+                record_single_go_import(c, content, fa, (c.start_position().row + 1) as u32);
             }
             "string" => {
                 let spec = text(content, c)
@@ -250,7 +250,7 @@ fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
                     let hint = spec.clone();
                     fa.imports.push(ImportFact {
                         spec: spec.clone(),
-                        line: c.start_position().row + 1,
+                        line: (c.start_position().row + 1) as u32,
                         dynamic: false,
                         hint,
                         bindings: vec![ImportBinding {
@@ -265,7 +265,7 @@ fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
                 let mut lcur = c.walk();
                 for s in c.named_children(&mut lcur) {
                     if s.kind() == "import_specification" {
-                        record_single_go_import(s, content, fa, s.start_position().row + 1);
+                        record_single_go_import(s, content, fa, (s.start_position().row + 1) as u32);
                     }
                 }
             }
@@ -313,13 +313,13 @@ fn is_exported(name: &str) -> bool {
 
 fn param_type_name(node: Node<'_>, content: &str) -> Option<String> {
     if let Some(t) = node.child_by_field_name("type") {
-        return text(content, &t);
+        return text(content, t);
     }
     // parenthesized parameter groups: (*Recv)(...)
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
         .find(|n| n.kind() == "pointer_type" || n.kind() == "identifier" || n.kind() == "type_identifier")
-        .and_then(|n| text(content, &n))
+        .and_then(|n| text(content, n))
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ fn visit_calls(
                     if p.kind() != "call_expression" || p.child_by_field_name("function") != Some(c) {
                         return;
                     }
-                    let line = p.start_position().row + 1;
+                    let line = (p.start_position().row + 1) as u32;
                     let target = text(content, c).unwrap_or_default();
                     if target.is_empty() {
                         return;
@@ -398,7 +398,7 @@ fn visit_calls(
                 if let Some(f) = c.child_by_field_name("function") {
                     if f.kind() == "identifier" {
                         if let Some(t) = text(content, f) {
-                            let line = f.start_position().row + 1;
+                            let line = (f.start_position().row + 1) as u32;
                             let from = if enclosing.is_empty() {
                                 String::new()
                             } else {
