@@ -220,7 +220,7 @@ fn collect_symbols(
     }
 }
 
-fn with_scope<T>(enclosing: &[String], name: &str, f: impl Fn(&[String]) -> T) -> T {
+fn with_scope<T>(enclosing: &[String], name: &str, mut f: impl FnMut(&[String]) -> T) -> T {
     let mut next = enclosing.to_vec();
     next.push(name.to_string());
     f(&next)
@@ -291,9 +291,9 @@ fn record_imports(root: Node<'_>, content: &str, fa: &mut FileAnalysis, aliases:
                     bindings.push(ImportBinding { local: d.clone(), original: String::new() });
                     aliases.insert((d.clone(), d));
                 }
-                if let Some(n) = c.child_by_field_name("namespace").and_then(|n| text(content, n)) {
-                    bindings.push(ImportBinding { local: n.clone(), original: String::new() });
-                    aliases.insert((n, n));
+                if let Some(ns) = c.child_by_field_name("namespace").and_then(|n| text(content, n)) {
+                    bindings.push(ImportBinding { local: ns.clone(), original: String::new() });
+                    aliases.insert((ns.clone(), ns));
                 }
                 if let Some(cl) = c.child_by_field_name("import_clause") {
                     let mut clcur = cl.walk();
@@ -307,8 +307,8 @@ fn record_imports(root: Node<'_>, content: &str, fa: &mut FileAnalysis, aliases:
                             continue;
                         }
                         let local = if alias.is_empty() { orig.clone() } else { alias };
-                        bindings.push(ImportBinding { local: local.clone(), original: orig });
-                        aliases.insert((local, orig));
+                        aliases.insert((local.clone(), orig.clone()));
+                        bindings.push(ImportBinding { local, original: orig });
                     }
                 }
                 let hint = spec.clone();
@@ -526,10 +526,11 @@ fn decl_export_name(node: Node<'_>, content: &str) -> Option<String> {
             .and_then(|n| text(content, n)),
         "variable_declaration" => {
             let mut cursor = node.walk();
-            node.named_children(&mut cursor)
+            let declarator = node
+                .named_children(&mut cursor)
                 .find(|d| d.kind() == "variable_declarator")
-                .and_then(|d| d.child_by_field_name("name"))
-                .and_then(|n| text(content, n))
+                .and_then(|d| d.child_by_field_name("name"));
+            declarator.and_then(|n| text(content, n))
         }
         _ => None,
     }
@@ -543,15 +544,15 @@ fn text(content: &str, node: Node<'_>) -> Option<String> {
     node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
 
-fn walk_all(node: Node<'_>) -> Vec<Node<'_>> {
-    fn gen(node: Node<'_>, out: &mut Vec<Node<'_>>) {
+fn walk_all<'t>(node: Node<'t>) -> Vec<Node<'t>> {
+    fn gen<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
         let mut cursor = node.walk();
         for c in node.named_children(&mut cursor) {
             out.push(c);
             gen(c, out);
         }
     }
-    let mut out: Vec<Node<'_>> = Vec::new();
+    let mut out = Vec::new();
     gen(node, &mut out);
     out
 }
