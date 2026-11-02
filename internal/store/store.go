@@ -10,12 +10,11 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
@@ -54,11 +53,11 @@ func Open(driver Driver, dsn string) (*Store, error) {
 			return nil, fmt.Errorf("sqlite pragma: %w", err)
 		}
 	case Postgres:
-		pgxDb, err := stdlib.OpenDBWithDefaultOptions(dsn)
-		if err != nil {
-			return nil, err
+		cfg, perr := pgx.ParseConfig(dsn)
+		if perr != nil {
+			return nil, perr
 		}
-		db = pgxDb
+		db = stdlib.OpenDB(*cfg)
 	default:
 		return nil, fmt.Errorf("unknown driver %q", driver)
 	}
