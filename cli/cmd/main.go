@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -25,5 +24,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-var _ = errors.New
