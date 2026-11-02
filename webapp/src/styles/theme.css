@@ -1,0 +1,137 @@
+/*
+ * Codebase Archaeologist — design tokens.
+ *
+ * Palette F (Pure Monochrome), dark-first. Semantic colours are consistent
+ * and accessible; the accent greys are reserved for interactive emphasis,
+ * never sprayed across every element.
+ *
+ * Dark (default)              Light (designed, not inverted)
+ * canvas        #090909      canvas        #FFFFFF
+ * surface-1     #171717      surface-1     #FAFAFA
+ * surface-2     #303030      surface-2     #F2F2F2
+ * accent        #BDBDBD      accent        #404040
+ * accent-2      #737373      accent-2      #737373
+ * text          #FAFAFA      text          #111111
+ */
+
+:root {
+  color-scheme: dark;
+  --theme: dark;
+
+  /* Surfaces */
+  --canvas: #090909;
+  --surface-1: #171717;
+  --surface-2: #303030;
+  --surface-3: #242424;
+  --canvas-translucent: rgba(9, 9, 9, 0.86);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.2);
+
+  /* Text */
+  --text-primary: #fafafa;
+  --text-secondary: #bdbdbd;
+  --text-muted: #737373;
+  --text-inverted: #0a0a0a;
+
+  /* Accent (restrained monochrome) */
+  --accent: #bdbdbd;
+  --accent-hover: #fafafa;
+  --accent-2: #737373;
+  --accent-surface: rgba(189, 189, 189, 0.08);
+  --accent-surface-strong: rgba(189, 189, 189, 0.16);
+
+  /* Focus */
+  --focus-ring: #fafafa;
+
+  /* Semantic — kept subdued, consistent, accessible on dark */
+  --success: #7fd4a8;
+  --success-soft: rgba(127, 212, 168, 0.12);
+  --warning: #d4b57f;
+  --warning-soft: rgba(212, 181, 127, 0.12);
+  --danger: #d47f7f;
+  --danger-soft: rgba(212, 127, 127, 0.12);
+  --info: #8fb8d4;
+  --info-soft: rgba(143, 184, 212, 0.12);
+
+  /* Typography */
+  --font-display:
+    'Instrument Sans', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', system-ui, sans-serif;
+  --font-ui:
+    'Instrument Sans', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', system-ui, sans-serif;
+  --font-mono:
+    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --letter-display: -0.02em;
+  --letter-ui: -0.01em;
+  --letter-mono: -0.02em;
+  --letter-caps: 0.08em;
+
+  --leading-display: 1.08;
+  --leading-body: 1.5;
+  --leading-dense: 1.3;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  /* Radius — restrained */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Layout frame */
+  --frame-max: 1440px;
+  --gutter-wide: 32px;
+  --gutter-narrow: 16px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --theme: light;
+
+  --canvas: #ffffff;
+  --surface-1: #fafafa;
+  --surface-2: #f2f2f2;
+  --surface-3: #ececec;
+  --canvas-translucent: rgba(255, 255, 255, 0.86);
+
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.22);
+
+  --text-primary: #111111;
+  --text-secondary: #404040;
+  --text-muted: #737373;
+  --text-inverted: #fafafa;
+
+  --accent: #404040;
+  --accent-hover: #111111;
+  --accent-2: #737373;
+  --accent-surface: rgba(0, 0, 0, 0.04);
+  --accent-surface-strong: rgba(0, 0, 0, 0.08);
+
+  --focus-ring: #111111;
+
+  --success: #1f7a4d;
+  --success-soft: rgba(31, 122, 77, 0.1);
+  --warning: #9a6d1f;
+  --warning-soft: rgba(154, 109, 31, 0.1);
+  --danger: #b03a3a;
+  --danger-soft: rgba(176, 58, 58, 0.09);
+  --info: #2f5f7a;
+  --info-soft: rgba(47, 95, 122, 0.09);
+}
