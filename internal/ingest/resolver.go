@@ -567,6 +567,8 @@ func resolveCalls(f *ParserFile, idx *index, commit, branch string) []store.Edge
 
 // resolveJSCalls: target "x" or "x.y" where x is an imported binding.
 func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
+	var out []store.Edge
+
 	// Build a local alias -> (imported original, target file) map from this
 	// file's imports that resolved.
 	alias := map[string]struct {
@@ -660,6 +662,8 @@ func resolveJSCalls(f *ParserFile, idx *index, commit string) []store.Edge {
 
 // resolveGoCalls: target "pkg.Symbol" where pkg is an import alias.
 func resolveGoCalls(f *ParserFile, idx *index, commit string) []store.Edge {
+	var out []store.Edge
+
 	// Build alias (local name) -> target Go file.
 	alias := map[string]*ParserFile{}
 	for _, imp := range f.Imports {
