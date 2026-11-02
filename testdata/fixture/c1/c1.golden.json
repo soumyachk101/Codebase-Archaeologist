@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "parserVersion": "archaeologist-parser/0.1.0",
-  "commit": "c1fixture",
+  "commit": "c1",
   "languages": [
     "go",
     "javascript",
@@ -12,8 +12,23 @@
       "path": "gomod/calc/calc.go",
       "language": "go",
       "parseOk": true,
-      "package": "",
+      "package": "calc",
       "symbols": [
+        {
+          "id": "2b487c776779e4df4daf9fb851c2d7b38b9857b6ba9acdd2a40d38640468f0d2",
+          "kind": "package",
+          "name": "calc",
+          "qualifiedName": "calc",
+          "language": "go",
+          "file": "gomod/calc/calc.go",
+          "startLine": 1,
+          "endLine": 1,
+          "startByte": 0,
+          "endByte": 0,
+          "exported": true,
+          "isTest": false,
+          "key": "go|gomod/calc/calc.go|package|calc"
+        },
         {
           "id": "7f343c86ef636e73c367bfe246076249f4e2bc909a625123308c68dbe886a445",
           "kind": "function",
@@ -28,24 +43,34 @@
           "exported": true,
           "isTest": false,
           "key": "go|gomod/calc/calc.go|function|Normalize"
-        },
-        {
-          "id": "e4fa16688df952db8f29d5d12db2160e08a9c9d1388581bbe78c12fd301ec0fb",
-          "kind": "package",
-          "name": "",
-          "qualifiedName": "",
-          "language": "go",
-          "file": "gomod/calc/calc.go",
-          "startLine": 1,
-          "endLine": 1,
-          "startByte": 0,
-          "endByte": 0,
-          "exported": true,
-          "isTest": false,
-          "key": "go|gomod/calc/calc.go|package|"
         }
       ],
-      "imports": [],
+      "imports": [
+        {
+          "spec": "math",
+          "line": 6,
+          "dynamic": false,
+          "hint": "math",
+          "bindings": [
+            {
+              "local": "math",
+              "original": ""
+            }
+          ]
+        },
+        {
+          "spec": "example.com/fixture/gomod/mathx",
+          "line": 8,
+          "dynamic": false,
+          "hint": "example.com/fixture/gomod/mathx",
+          "bindings": [
+            {
+              "local": "mathx",
+              "original": ""
+            }
+          ]
+        }
+      ],
       "calls": [
         {
           "line": 13,
@@ -70,7 +95,7 @@
       "path": "gomod/mathx/mathx.go",
       "language": "go",
       "parseOk": true,
-      "package": "",
+      "package": "mathx",
       "symbols": [
         {
           "id": "6859ae868899cf6f35ea6b84f8dae2a6478c03eda501f8e65642bb0c96a2df72",
@@ -88,10 +113,10 @@
           "key": "go|gomod/mathx/mathx.go|function|Clamp"
         },
         {
-          "id": "d71905199fbd2bcf0929aa7fabe66bf4fd8188f03519c99bb4c9edf278c3d959",
+          "id": "c22f08b5fd78b7cf8d7b0da1d1e8a735cc94941f675cb40892b11baec0ac5aec",
           "kind": "package",
-          "name": "",
-          "qualifiedName": "",
+          "name": "mathx",
+          "qualifiedName": "mathx",
           "language": "go",
           "file": "gomod/mathx/mathx.go",
           "startLine": 1,
@@ -100,7 +125,7 @@
           "endByte": 0,
           "exported": true,
           "isTest": false,
-          "key": "go|gomod/mathx/mathx.go|package|"
+          "key": "go|gomod/mathx/mathx.go|package|mathx"
         }
       ],
       "imports": [],
@@ -129,6 +154,21 @@
           "exported": false,
           "isTest": false,
           "key": "javascript|js/app.js|module|js/app.js"
+        },
+        {
+          "id": "e55bdfca8cb617a1f56daedcc4597827fe832cfc5ff033e4800cecc421fd8ac6",
+          "kind": "function",
+          "name": "total",
+          "qualifiedName": "total",
+          "language": "javascript",
+          "file": "js/app.js",
+          "startLine": 5,
+          "endLine": 9,
+          "startByte": 168,
+          "endByte": 271,
+          "exported": true,
+          "isTest": false,
+          "key": "javascript|js/app.js|function|total"
         }
       ],
       "imports": [
@@ -178,6 +218,21 @@
       "package": "",
       "symbols": [
         {
+          "id": "0fcdf50d807b847863ef8554da3d1772c5363f5af5b191bcfb9b69c02cd83605",
+          "kind": "function",
+          "name": "mul",
+          "qualifiedName": "mul",
+          "language": "javascript",
+          "file": "js/util.js",
+          "startLine": 6,
+          "endLine": 8,
+          "startByte": 129,
+          "endByte": 167,
+          "exported": true,
+          "isTest": false,
+          "key": "javascript|js/util.js|function|mul"
+        },
+        {
           "id": "7e4469cd963679f352e46566334488f13f050cd8d42799c3481d6921fa64bd1b",
           "kind": "module",
           "name": "util.js",
@@ -191,6 +246,21 @@
           "exported": false,
           "isTest": false,
           "key": "javascript|js/util.js|module|js/util.js"
+        },
+        {
+          "id": "d362d1cf9482bde1e2097700af87e2bf26a14a8ec39ab9e19432103ac7ab494c",
+          "kind": "function",
+          "name": "add",
+          "qualifiedName": "add",
+          "language": "javascript",
+          "file": "js/util.js",
+          "startLine": 2,
+          "endLine": 4,
+          "startByte": 82,
+          "endByte": 120,
+          "exported": true,
+          "isTest": false,
+          "key": "javascript|js/util.js|function|add"
         }
       ],
       "imports": [],
@@ -207,6 +277,21 @@
       "package": "",
       "symbols": [
         {
+          "id": "05e4732125887611b037be6ba19c2a061d8a18beb98913ec740bb7943e1e77f0",
+          "kind": "function",
+          "name": "circleArea",
+          "qualifiedName": "circleArea",
+          "language": "typescript",
+          "file": "ts/shapes.ts",
+          "startLine": 7,
+          "endLine": 9,
+          "startByte": 189,
+          "endByte": 257,
+          "exported": true,
+          "isTest": false,
+          "key": "typescript|ts/shapes.ts|function|circleArea"
+        },
+        {
           "id": "16baaa863a8ad7d2e9087697425e10a9da4983d9a6a7d6437729817c3c43e3e1",
           "kind": "module",
           "name": "shapes.ts",
@@ -220,6 +305,21 @@
           "exported": false,
           "isTest": false,
           "key": "typescript|ts/shapes.ts|module|ts/shapes.ts"
+        },
+        {
+          "id": "5c77292d132c2c0db0233594d10f204cea426b7d60a58d37e6551e1f4ffd3925",
+          "kind": "interface",
+          "name": "Shape",
+          "qualifiedName": "Shape",
+          "language": "typescript",
+          "file": "ts/shapes.ts",
+          "startLine": 2,
+          "endLine": 4,
+          "startByte": 64,
+          "endByte": 101,
+          "exported": true,
+          "isTest": false,
+          "key": "typescript|ts/shapes.ts|interface|Shape"
         }
       ],
       "imports": [],
@@ -229,5 +329,10 @@
       ]
     }
   ],
-  "skipped": []
+  "skipped": [
+    {
+      "path": "c1.golden.json",
+      "reason": "unsupported file extension for pinned language 'auto'"
+    }
+  ]
 }
