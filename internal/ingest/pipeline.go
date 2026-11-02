@@ -441,14 +441,8 @@ func (p *Pipeline) runParser(ctx context.Context, parserBin, commit, snap string
 	if err := json.Unmarshal(out.Bytes(), &manifest); err != nil {
 		return ParserManifest{}, fmt.Errorf("parse parser output: %w", err)
 	}
-	// Merge skip records the parser emitted (unsupported files).
-	for _, s := range manifest.Skipped {
-		inputPaths := map[string]bool{}
-		for _, f := range input.Files {
-			inputPaths[f.Path] = true
-		}
-		_ = inputPaths
-	}
+	// Skip records the parser emitted for unsupported files travel with
+	// the manifest and are persisted downstream.
 	return manifest, nil
 }
 
