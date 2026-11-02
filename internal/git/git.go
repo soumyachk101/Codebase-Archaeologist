@@ -9,7 +9,6 @@ package git
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -215,7 +214,7 @@ func (r *Repo) Snapshot(ctx context.Context, commit, dest string) error {
 	cmd := exec.CommandContext(ctx, "git", "archive", commit)
 	cmd.Dir = r.Path
 	tarCmd := exec.Command("tar", "-x", "-C", dest)
-	pr, err := cmd.Stdpipe() //nolint:staticcheck // pre-1.21 idiom
+	pr, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
