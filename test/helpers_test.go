@@ -194,28 +194,35 @@ func openStore(t *testing.T, root string) *store.Store {
 // repoIDFor mirrors the CLI's identity scheme: "repo-" + absolute root.
 func repoIDFor(root string) string { return "repo-" + root }
 
-// indexFull runs a complete (non-incremental) pipeline index of `commit`,
-// recording which paths actually reached the parser via a recording
-// runner that delegates to the real tree-sitter binary. It returns the
-// recorded path set alongside the pipeline Result.
-func indexFull(t *testing.T, st *store.Store, repo gitRepo, commit, dataDir string) (ingest.Result, []string) {
+// indexFullWith runs a complete (non-incremental) pipeline index of
+// `commit` using the caller-supplied dataDir (so sibling runs can share a
+// manifest cache), recording which paths actually reached the parser via a
+// recording runner that delegates to the real tree-sitter binary. It
+// returns the recorded path set alongside the pipeline Result.
+func indexFullWith(t *testing.T, st *store.Store, repo gitRepo, commit, dataDir string) (ingest.Result, []string) {
 	t.Helper()
 	bin := parserBin(t)
 	pipe := ingest.New(st, repo.root, dataDir)
 	var recorded []string
-	pipe.SetParserRunner(func(ctx context.Context, parserBinArg, commitArg, snap string, paths []string) (ingest.ParserManifest, error) {
+	pipe.SetParserRunner(func(ctx context.Context, _, commitArg, snap string, paths []string) (ingest.ParserManifest, error) {
 		recorded = append([]string(nil), paths...)
 		return invokeParser(ctx, bin, commitArg, snap, paths)
 	})
 	res, err := pipe.Run(context.Background(), ingest.Options{
-		Commit:  commit,
-		RepoID:  repoIDFor(repo.root),
+		Commit:    commit,
+		RepoID:    repoIDFor(repo.root),
 		ParserBin: bin,
 	})
 	if err != nil {
 		t.Fatalf("index %s: %v", commit, err)
 	}
 	return res, recorded
+}
+
+// indexFull is indexFullWith with a throwaway data dir.
+func indexFull(t *testing.T, st *store.Store, repo gitRepo, commit string) (ingest.Result, []string) {
+	t.Helper()
+	return indexFullWith(t, st, repo, commit, t.TempDir())
 }
 
 // invokeParser mirrors ingest's default parser runner: feed the tree-sitter
