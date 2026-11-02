@@ -1,0 +1,34 @@
+# Build cache
+.git
+.gitignore
+
+# Rust build output (rebuilt in the image's parser stage)
+parser/target
+**/target
+
+# Go toolchain / vendor noise
+vendor
+
+# Local data — runtime data, never image data
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Secrets and local config overrides
+.env
+.env.*
+config/
+
+# Test data: fixture repos are OUT of the image by policy. Fixtures are
+# test data, not runtime data — they are never baked into the image and
+# never mounted into the compose stack.
+testdata/
+fixtures/
+
+# Webapp deps (if webapp/ ever gets one)
+webapp/node_modules
+node_modules
+
+# CI
+.github
