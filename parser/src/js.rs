@@ -28,9 +28,9 @@ pub fn extract(content: &str, path: &str, ts: bool) -> FileAnalysis {
 
     let mut parser = Parser::new();
     if (if ts {
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+        parser.set_language(&tree_sitter_typescript::language_typescript())
     } else {
-        parser.set_language(&tree_sitter_javascript::LANGUAGE.into())
+        parser.set_language(&tree_sitter_javascript::language())
     })
     .is_err()
     {
@@ -105,7 +105,8 @@ fn collect_symbols(
     out: &mut Vec<Symbol>,
     ts: bool,
 ) {
-    for c in node.named_children() {
+    let mut cursor = node.walk();
+    for c in node.named_children(&mut cursor) {
         match c.kind() {
             "function_declaration" | "generator_function_declaration" => {
                 let name = c
@@ -132,46 +133,53 @@ fn collect_symbols(
                 let qn = join(enclosing, &name);
                 let exported = c.parent().map(parent_is_exported).unwrap_or(false);
                 push_symbol(out, c, content, path, lang, "class", &name, &qn, exported, path_is_test(path), enclosing);
-                for block in c.named_children().filter(|n| n.kind() == "statement_block") {
-                    for m in block.named_children() {
-                        if m.kind() != "method_definition" {
-                            continue;
+                {
+                    let mut ccur = c.walk();
+                    for block in c.named_children(&mut ccur).filter(|n| n.kind() == "statement_block") {
+                        let mut bcur = block.walk();
+                        for m in block.named_children(&mut bcur) {
+                            if m.kind() != "method_definition" {
+                                continue;
+                            }
+                            let mn = m
+                                .child_by_field_name("name")
+                                .and_then(|n| text(content, n))
+                                .unwrap_or_default();
+                            if mn.is_empty() {
+                                continue;
+                            }
+                            let mq = format!("{qn}.{mn}");
+                            let is_test = path_is_test(path) || mn.contains("test");
+                            let single = vec![qn.clone()];
+                            push_symbol(out, m, content, path, lang, "method", &mn, &mq, false, is_test, &single);
+                            collect_symbols(m, content, path, lang, &[qn.clone()], out, ts);
                         }
-                        let mn = m
-                            .child_by_field_name("name")
-                            .and_then(|n| text(content, n))
-                            .unwrap_or_default();
-                        if mn.is_empty() {
-                            continue;
-                        }
-                        let mq = format!("{qn}.{mn}");
-                        let is_test = path_is_test(path) || mn.contains("test");
-                        let single = vec![qn.clone()];
-                        push_symbol(out, m, content, path, lang, "method", &mn, &mq, false, is_test, &single);
-                        collect_symbols(m, content, path, lang, &[qn.clone()], out, ts);
                     }
                 }
             }
             "variable_declaration" => {
                 let is_const = c.child(0).map(|n| n.kind() == "const").unwrap_or(false);
                 let exported = parent_is_exported(c.parent());
-                for vd in c.named_children().filter(|n| n.kind() == "variable_declarator") {
-                    let name = vd
-                        .child_by_field_name("name")
-                        .and_then(|n| text(content, n))
-                        .unwrap_or_default();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    let kind = if is_const { "constant" } else { "variable" };
-                    let qn = join(enclosing, &name);
-                    let is_test = path_is_test(path) || name.contains("test");
-                    push_symbol(out, vd, content, path, lang, kind, &name, &qn, exported, is_test, enclosing);
-                    if let Some(v) = vd.child_by_field_name("value") {
-                        if v.kind() == "arrow_function" || v.kind() == "function" {
-                            with_scope(enclosing, &name, |scope| {
-                                collect_symbols(v, content, path, lang, scope, out, ts);
-                            });
+                {
+                    let mut vcur = c.walk();
+                    for vd in c.named_children(&mut vcur).filter(|n| n.kind() == "variable_declarator") {
+                        let name = vd
+                            .child_by_field_name("name")
+                            .and_then(|n| text(content, n))
+                            .unwrap_or_default();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let kind = if is_const { "constant" } else { "variable" };
+                        let qn = join(enclosing, &name);
+                        let is_test = path_is_test(path) || name.contains("test");
+                        push_symbol(out, vd, content, path, lang, kind, &name, &qn, exported, is_test, enclosing);
+                        if let Some(v) = vd.child_by_field_name("value") {
+                            if v.kind() == "arrow_function" || v.kind() == "function" {
+                                with_scope(enclosing, &name, |scope| {
+                                    collect_symbols(v, content, path, lang, scope, out, ts);
+                                });
+                            }
                         }
                     }
                 }
@@ -190,7 +198,8 @@ fn collect_symbols(
                 push_symbol(out, c, content, path, lang, kind, &name, &qn, exported, false, enclosing);
             }
             "export_statement" => {
-                for d in c.named_children() {
+                let mut ecur = c.walk();
+                for d in c.named_children(&mut ecur) {
                     if matches!(
                         d.kind(),
                         "function_declaration"
@@ -287,7 +296,8 @@ fn record_imports(root: &Node, content: &str, fa: &mut FileAnalysis, aliases: &m
                     aliases.insert((n, n));
                 }
                 if let Some(cl) = c.child_by_field_name("import_clause") {
-                    for s in cl.named_children() {
+                    let mut clcur = cl.walk();
+                    for s in cl.named_children(&mut clcur) {
                         if s.kind() != "import_specifier" {
                             continue;
                         }
@@ -301,7 +311,8 @@ fn record_imports(root: &Node, content: &str, fa: &mut FileAnalysis, aliases: &m
                         aliases.insert((local, orig));
                     }
                 }
-                fa.imports.push(ImportFact { spec, line, dynamic: false, bindings });
+                let hint = spec.clone();
+                fa.imports.push(ImportFact { spec, line, dynamic: false, hint, bindings });
             }
             "dynamic_import" => {
                 let spec = c
@@ -313,6 +324,7 @@ fn record_imports(root: &Node, content: &str, fa: &mut FileAnalysis, aliases: &m
                     spec,
                     line,
                     dynamic: true,
+                    hint: String::new(),
                     bindings: vec![ImportBinding { local: format!("dyn@{line}"), original: String::new() }],
                 });
             }
@@ -345,7 +357,8 @@ fn visit_calls(
     if depth > 64 || out.len() >= MAX_CALLS_PER_FILE {
         return;
     }
-    for c in node.named_children() {
+    let mut cursor = node.walk();
+    for c in node.named_children(&mut cursor) {
         match c.kind() {
             "function_declaration" | "generator_function_declaration" => {
                 let name = c
@@ -394,7 +407,8 @@ fn visit_calls(
                                 out.push(CallFact {
                                     line,
                                     from: from.clone(),
-                                    target: t,
+                                    target: t.clone(),
+                                    hint: t,
                                     imported_name: imported,
                                 });
                             }
@@ -413,7 +427,8 @@ fn visit_calls(
                                 out.push(CallFact {
                                     line,
                                     from: from.clone(),
-                                    target,
+                                    target: target.clone(),
+                                    hint: target,
                                     imported_name: imported,
                                 });
                             }
@@ -425,7 +440,7 @@ fn visit_calls(
                 visit_calls(c, content, module_id, aliases, out, enclosing, depth + 1);
             }
             _ => {
-                if c.has_named_children() {
+                if c.named_child_count() > 0 {
                     visit_calls(c, content, module_id, aliases, out, enclosing, depth + 1);
                 }
             }
@@ -440,17 +455,20 @@ fn visit_calls(
 fn exported_names(fa: &FileAnalysis, root: &Node, content: &str, ts: bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
 
-    for c in root.named_children() {
+    let mut rcursor = root.walk();
+    for c in root.named_children(&mut rcursor) {
         if c.kind() != "export_statement" {
             continue;
         }
-        for d in c.named_children() {
-            if let Some(n) = decl_export_name(d) {
+        let mut ecur = c.walk();
+        for d in c.named_children(&mut ecur) {
+            if let Some(n) = decl_export_name(d, content) {
                 out.push(n);
             }
         }
         if let Some(cl) = c.child_by_field_name("export_clause") {
-            for s in cl.named_children() {
+            let mut clcur = cl.walk();
+            for s in cl.named_children(&mut clcur) {
                 match s.kind() {
                     "shorthand_identifier_export" => {
                         if let Some(n) = text(content, s.child_by_field_name("name").unwrap_or(s)) {
@@ -501,18 +519,18 @@ fn exported_names(fa: &FileAnalysis, root: &Node, content: &str, ts: bool) -> Ve
     out
 }
 
-fn decl_export_name(node: &Node) -> Option<String> {
+fn decl_export_name(node: &Node, content: &str) -> Option<String> {
     match node.kind() {
         "function_declaration" | "generator_function_declaration" | "class_declaration" => node
             .child_by_field_name("name")
-            .and_then(|n| n.utf8_text())
-            .map(str::to_string),
-        "variable_declaration" => node
-            .named_children()
-            .find(|d| d.kind() == "variable_declarator")
-            .and_then(|d| d.child_by_field_name("name"))
-            .and_then(|n| n.utf8_text())
-            .map(str::to_string),
+            .and_then(|n| text(content, n)),
+        "variable_declaration" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .find(|d| d.kind() == "variable_declarator")
+                .and_then(|d| d.child_by_field_name("name"))
+                .and_then(|n| text(content, n))
+        }
         _ => None,
     }
 }
@@ -521,18 +539,19 @@ fn decl_export_name(node: &Node) -> Option<String> {
 // helpers
 // ---------------------------------------------------------------------------
 
-fn text<'a>(content: &'a str, node: &Node) -> Option<String> {
-    node.utf8_text(content).map(str::to_string)
+fn text(content: &str, node: &Node) -> Option<String> {
+    node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
 
-fn walk_all<'a>(node: &Node) -> impl Iterator<Item = Node<'a>> {
-    fn gen<'a>(n: &Node<'a>, out: &mut Vec<Node<'a>>) {
-        for c in n.named_children() {
+fn walk_all(node: &Node) -> Vec<Node> {
+    fn gen(n: &Node, out: &mut Vec<Node>) {
+        let mut cursor = n.walk();
+        for c in n.named_children(&mut cursor) {
             out.push(c);
-            gen(c, out);
+            gen(&c, out);
         }
     }
-    let mut v = Vec::new();
-    gen(node, &mut v);
-    v.into_iter()
+    let mut out = Vec::new();
+    gen(node, &mut out);
+    out
 }
