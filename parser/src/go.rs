@@ -75,7 +75,7 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                     id: symbol_id(lang, path, "function", &qn),
                     kind: "function".into(),
                     name: name.clone(),
-                    qualified_name: qn,
+                    qualified_name: qn.clone(),
                     language: lang.into(),
                     file: path.into(),
                     start_line: (c.start_position().row + 1) as u32,
@@ -97,7 +97,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                     .child_by_field_name("receiver")
                     .and_then(|r| {
                         let mut rc = r.walk();
-                        r.named_children(&mut rc).next()
+                        let child = r.named_children(&mut rc).next();
+                        child
                     })
                     .and_then(|n| param_type_name(n, content))
                     .unwrap_or_default();
@@ -110,7 +111,7 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                     id: symbol_id(lang, path, "method", &qn),
                     kind: "method".into(),
                     name: name.clone(),
-                    qualified_name: qn,
+                    qualified_name: qn.clone(),
                     language: lang.into(),
                     file: path.into(),
                     start_line: (c.start_position().row + 1) as u32,
@@ -274,13 +275,12 @@ fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
 }
 
 fn record_single_go_import(s: Node<'_>, content: &str, fa: &mut FileAnalysis, line: u32) {
-    let spec = {
-        let mut scur = s.walk();
-        s.named_children(&mut scur)
-            .find(|n| n.kind() == "string")
-            .and_then(|n| text(content, n))
-            .map(|s| s.trim_matches('"').to_string())
-    };
+    let mut scur = s.walk();
+    let raw = s
+        .named_children(&mut scur)
+        .find(|n| n.kind() == "string")
+        .and_then(|n| text(content, n));
+    let spec = raw.map(|s| s.trim_matches('"').to_string());
     if let Some(spec) = spec {
         let mut acur = s.walk();
         let alias = s
@@ -317,9 +317,11 @@ fn param_type_name(node: Node<'_>, content: &str) -> Option<String> {
     }
     // parenthesized parameter groups: (*Recv)(...)
     let mut cursor = node.walk();
-    node.named_children(&mut cursor)
+    let found = node
+        .named_children(&mut cursor)
         .find(|n| n.kind() == "pointer_type" || n.kind() == "identifier" || n.kind() == "type_identifier")
-        .and_then(|n| text(content, n))
+        .and_then(|n| text(content, n));
+    found
 }
 
 // ---------------------------------------------------------------------------
