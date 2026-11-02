@@ -60,7 +60,7 @@ func run() error {
 
 	// 3. Handler chain: per-repository token bucket fronts the public read
 	// endpoints; the API key authenticates every request when configured.
-	handler := api.New(st)
+	var handler http.Handler = api.New(st)
 	handler = api.RateLimiter(0, handler) // 0 -> api.go's default of 10 req/s
 	if cfg.AuthKey != "" {
 		handler = api.Auth(cfg.AuthKey, handler)
