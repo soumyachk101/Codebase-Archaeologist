@@ -169,10 +169,10 @@ func New(st *store.Store) *chi.Mux {
 				Commit  string `json:"commit"`
 			} `json:"evidence"`
 		}{sym, struct {
-			File    string
-			Line    int32
-			EndLine int32
-			Commit  string
+			File    string `json:"file"`
+			Line    int32  `json:"line"`
+			EndLine int32  `json:"endLine"`
+			Commit  string `json:"commit"`
 		}{sym.File, sym.StartLine, sym.EndLine, sym.Commit}})
 	})
 
@@ -355,11 +355,11 @@ func joinClaims(claims []string) string {
 // — no body, no Authorization header, no secrets.
 func structuredLogger(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
-		ow := middleware.NewMemResponseWriter()
+		ow := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		start := time.Now()
 		next.ServeHTTP(ow, r)
 		log.Printf("method=%s path=%s status=%d dur_ms=%d req_id=%s",
-			r.Method, r.URL.Path, ow.StatusCode,
+			r.Method, r.URL.Path, ow.Status(),
 			int(time.Since(start).Milliseconds()), middleware.GetReqID(r.Context()))
 	}
 	return http.HandlerFunc(fn)
