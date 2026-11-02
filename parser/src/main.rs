@@ -14,7 +14,6 @@
 use std::io::{self, Read};
 use std::process::ExitCode;
 
-use anyhow::Result;
 use parser::manifest::Manifest;
 use parser::InputManifest;
 
