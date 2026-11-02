@@ -55,7 +55,7 @@ pub fn edge_id(kind: &str, from_symbol: &str, hint: &str, source_file: &str, sou
     h.update(b"|");
     h.update(source_file.as_bytes());
     h.update(b"|");
-    write!(h, "{source_line}").ok();
+    h.update(source_line.to_string().as_bytes());
     encode(h.finalize())[..24].to_string()
 }
 
