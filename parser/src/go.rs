@@ -20,7 +20,7 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
     let mut fa = FileAnalysis::new(path, lang);
 
     let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_go::LANGUAGE.into()).is_err() {
+    if parser.set_language(&tree_sitter_go::language()).is_err() {
         fa.parse_error = Some("parser language initialization failed".into());
         return fa;
     }
@@ -230,10 +230,12 @@ fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
                     .map(|s| s.trim_matches('"').to_string())
                     .filter(|s| !s.is_empty());
                 if let Some(spec) = spec {
+                    let hint = spec.clone();
                     fa.imports.push(ImportFact {
                         spec: spec.clone(),
                         line: c.start_position().row + 1,
                         dynamic: false,
+                        hint,
                         bindings: vec![ImportBinding {
                             local: package_last_segment(&spec),
                             original: String::new(),
@@ -268,10 +270,12 @@ fn record_single_go_import(s: &Node, content: &str, fa: &mut FileAnalysis, line:
             Some(a) if a != "." => a,
             _ => package_last_segment(&spec),
         };
+        let hint = spec.clone();
         fa.imports.push(ImportFact {
             spec,
             line,
             dynamic: false,
+            hint,
             bindings: vec![ImportBinding { local, original: String::new() }],
         });
     }
@@ -349,14 +353,15 @@ fn visit_calls(
                     let imported_name = if rest.is_empty() {
                         None
                     } else {
-                        Some(target)
+                        Some(target.clone())
                     };
                     let from = if enclosing.is_empty() {
                         String::new()
                     } else {
                         enclosing.last().unwrap().clone()
                     };
-                    out.push(CallFact { line, from, target, imported_name });
+                    let hint = target.clone();
+                    out.push(CallFact { line, from, target, hint, imported_name });
                 }
             }
             "call_expression" => {
