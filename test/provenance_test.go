@@ -49,8 +49,7 @@ func TestProvenanceInvariantIncremental(t *testing.T) {
 
 	dataDir := t.TempDir()
 	// Full index of c1 first (builds the manifest cache c2 can carry from).
-	if _, _ := indexFullWith(t, st, repo, repo.c1, dataDir); _ != nil {
-	}
+	indexFullWith(t, st, repo, repo.c1, dataDir)
 
 	// Incremental c2 run: only the changed file (js/app.js) is re-parsed.
 	bin := parserBin(t)
