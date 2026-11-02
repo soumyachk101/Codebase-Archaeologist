@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/ensembyte/archaeologist/internal/git"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +38,7 @@ func newPurge() *cobra.Command {
 			// the repository ID is derived from the absolute path.
 			repo := &git.Repo{Path: a.root}
 			if !repo.IsRepo(ctx) {
-				return cmd.Errorf("%s is not a git working tree; nothing indexed under it", a.root)
+				return fmt.Errorf("%s is not a git working tree; nothing indexed under it", a.root)
 			}
 			if err := a.store.DeleteRepositoryFully(ctx, a.repoID); err != nil {
 				return err
