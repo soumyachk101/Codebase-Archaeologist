@@ -194,6 +194,30 @@ func openStore(t *testing.T, root string) *store.Store {
 // repoIDFor mirrors the CLI's identity scheme: "repo-" + absolute root.
 func repoIDFor(root string) string { return "repo-" + root }
 
+// openStoreAt opens a SQLite store at an explicit DB path (instead of a
+// throwaway temp path) and registers the repository by its absolute root.
+// Used by the CLI smoke test so the cobra command and the index write to
+// the same database file.
+func openStoreAt(t *testing.T, dbPath, root string) *store.Store {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(store.SQLite, dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite store at %s: %v", dbPath, err)
+	}
+	if err := st.Migrate(ctx); err != nil {
+		st.Close()
+		t.Fatalf("migrate store: %v", err)
+	}
+	if err := st.CreateRepository(ctx, store.Repository{
+		ID: "repo-" + root, Name: filepath.Base(root), Origin: "local", Root: root,
+	}); err != nil {
+		st.Close()
+		t.Fatalf("create repository: %v", err)
+	}
+	return st
+}
+
 // indexFullWith runs a complete (non-incremental) pipeline index of
 // `commit` using the caller-supplied dataDir (so sibling runs can share a
 // manifest cache), recording which paths actually reached the parser via a
