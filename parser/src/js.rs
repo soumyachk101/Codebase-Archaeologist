@@ -543,15 +543,15 @@ fn text(content: &str, node: &Node) -> Option<String> {
     node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
 
-fn walk_all(node: &Node) -> Vec<Node> {
-    fn gen(n: &Node, out: &mut Vec<Node>) {
+fn walk_all<'t>(node: &Node<'t>) -> Vec<Node<'t>> {
+    fn gen<'t>(n: &Node<'t>, out: &mut Vec<Node<'t>>) {
         let mut cursor = n.walk();
         for c in n.named_children(&mut cursor) {
             out.push(c);
             gen(&c, out);
         }
     }
-    let mut out = Vec::new();
+    let mut out: Vec<Node<'t>> = Vec::new();
     gen(node, &mut out);
     out
 }
