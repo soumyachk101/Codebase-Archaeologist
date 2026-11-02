@@ -98,18 +98,18 @@ func buildGitFixture(t *testing.T) gitRepo {
 	copyTree(t, filepath.Join(productRoot(t), "testdata", "fixture", "c1"), root)
 	git("add", "-A")
 	git("commit", "-q", "-m", "c1: initial indexable tree")
-	c1, _ := gitOut(root, "rev-parse", "HEAD")
+	c1, _ := gitOut(root, []string{"rev-parse", "HEAD"})
 
 	// Commit 2: apply the c2 change to the single file that differs.
 	overlay(t, filepath.Join(productRoot(t), "testdata", "fixture", "c2"), root, "js/app.js")
 	git("add", "-A")
 	git("commit", "-q", "-m", "c2: add scale() export")
-	c2, _ := gitOut(root, "rev-parse", "HEAD")
+	c2, _ := gitOut(root, []string{"rev-parse", "HEAD"})
 
 	return gitRepo{root: root, c1: c1, c2: c2}
 }
 
-func gitOut(dir, args ...string) (string, error) {
+func gitOut(dir string, args []string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
