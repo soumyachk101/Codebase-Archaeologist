@@ -19,9 +19,11 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ensembyte/archaeologist/internal/explain"
 	"github.com/ensembyte/archaeologist/internal/search"
