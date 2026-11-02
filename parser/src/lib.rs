@@ -76,15 +76,13 @@ pub fn run(input: &InputManifest) -> Result<Manifest> {
             None => {
                 skipped.push(manifest::SkippedFile {
                     path: file.path.clone(),
-                    reason: format!(
-                        "unsupported file extension for pinned language '{input.language}'"
-                    ),
+                    reason: format!("unsupported file extension for pinned language '{}'", input.language),
                 });
             }
         }
     }
 
-    let mut files: Vec<manifest::FileAnalysis> = analyses.into_values().collect();
+    let files: Vec<manifest::FileAnalysis> = analyses.into_values().collect();
     let mut m = manifest::Manifest::new(input.commit.clone(), files);
     m.skipped = skipped;
     m.finalize();
