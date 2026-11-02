@@ -258,7 +258,7 @@ fn record_go_imports(node: Node<'_>, content: &str, fa: &mut FileAnalysis) {
             if pkind == "import_specification" || pkind == "import_declaration" {
                 let mut pcur = parent.walk();
                 let kids: Vec<Node> = parent.named_children(&mut pcur).collect();
-                if let Some(pos) = kids.iter().position(|k| k == c) {
+                if let Some(pos) = kids.iter().position(|k| *k == c) {
                     if pos > 0 {
                         let a = &kids[pos - 1];
                         if matches!(a.kind(), "identifier" | "period" | "underscore") {
