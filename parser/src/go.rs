@@ -62,7 +62,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
     }];
 
     // Declarations.
-    for c in root.named_children() {
+    let mut cursor = root.walk();
+    for c in root.named_children(&mut cursor) {
         match c.kind() {
             "function_declaration" => {
                 let name = c.child_by_field_name("name").and_then(|n| text(content, n)).unwrap_or_default();
@@ -94,7 +95,10 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                 }
                 let rec = c
                     .child_by_field_name("receiver")
-                    .and_then(|r| r.named_children().next())
+                    .and_then(|r| {
+                        let mut rc = r.walk();
+                        r.named_children(&mut rc).next()
+                    })
                     .and_then(|n| param_type_name(n, content))
                     .unwrap_or_default();
                 let qn = if rec.is_empty() {
@@ -120,12 +124,14 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                 });
             }
             "type_declaration" => {
-                for td in c.named_children().filter(|n| n.kind() == "type_spec") {
+                let mut tcur = c.walk();
+                for td in c.named_children(&mut tcur).filter(|n| n.kind() == "type_spec") {
                     let name = td.child_by_field_name("name").and_then(|n| text(content, n)).unwrap_or_default();
                     if name.is_empty() {
                         continue;
                     }
-                    let kind = if td.named_children().any(|n| n.kind() == "interface_type") {
+                    let mut xcur = td.walk();
+                    let kind = if td.named_children(&mut xcur).any(|n| n.kind() == "interface_type") {
                         "interface"
                     } else {
                         "struct"
@@ -149,8 +155,15 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
                 }
             }
             "const_declaration" | "var_declaration" => {
-                for spec in c.named_children().filter(|n| n.kind() == "const_spec" || n.kind() == "var_spec") {
-                    let names = spec.named_children().filter(|n| n.kind() == "identifier").map(|n| text(content, n).unwrap_or_default()).filter(|n| !n.is_empty()).collect::<Vec<_>>();
+                let mut scur = c.walk();
+                for spec in c.named_children(&mut scur).filter(|n| n.kind() == "const_spec" || n.kind() == "var_spec") {
+                    let mut spcur = spec.walk();
+                    let names: Vec<String> = spec
+                        .named_children(&mut spcur)
+                        .filter(|n| n.kind() == "identifier")
+                        .map(|n| text(content, n).unwrap_or_default())
+                        .filter(|n| !n.is_empty())
+                        .collect();
                     let kind = if c.kind() == "const_declaration" { "constant" } else { "variable" };
                     for nm in names {
                         fa.symbols.push(Symbol {
@@ -178,7 +191,8 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
 
     // Imports.
     if let Some(imps) = root.child_by_field_name("imports") {
-        for c in imps.named_children() {
+        let mut icur = imps.walk();
+        for c in imps.named_children(&mut icur) {
             if c.kind() != "import_declaration" {
                 continue;
             }
@@ -206,10 +220,12 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
 }
 
 fn go_package_name(root: &Node, content: &str) -> Option<String> {
-    for c in root.named_children() {
+    let mut cursor = root.walk();
+    for c in root.named_children(&mut cursor) {
         if c.kind() == "package_clause" {
+            let mut cc = c.walk();
             return c
-                .named_children()
+                .named_children(&mut cc)
                 .find(|n| n.kind() == "identifier")
                 .and_then(|n| text(content, n));
         }
@@ -220,7 +236,8 @@ fn go_package_name(root: &Node, content: &str) -> Option<String> {
 fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
     // Single-line forms: import "pkg" | import alias "pkg" | import . "pkg"
     // Block form: import ( ... ) with one import_specification per line.
-    for c in node.named_children() {
+    let mut cursor = node.walk();
+    for c in node.named_children(&mut cursor) {
         match c.kind() {
             "import_specification" => {
                 record_single_go_import(c, content, fa, c.start_position().row + 1);
@@ -245,7 +262,8 @@ fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
             }
             _ => {
                 // import_list: children are import_specification nodes.
-                for s in c.named_children() {
+                let mut lcur = c.walk();
+                for s in c.named_children(&mut lcur) {
                     if s.kind() == "import_specification" {
                         record_single_go_import(s, content, fa, s.start_position().row + 1);
                     }
@@ -256,14 +274,17 @@ fn record_go_imports(node: &Node, content: &str, fa: &mut FileAnalysis) {
 }
 
 fn record_single_go_import(s: &Node, content: &str, fa: &mut FileAnalysis, line: u32) {
-    let spec = s
-        .named_children()
-        .find(|n| n.kind() == "string")
-        .and_then(|n| text(content, n))
-        .map(|s| s.trim_matches('"').to_string());
+    let spec = {
+        let mut scur = s.walk();
+        s.named_children(&mut scur)
+            .find(|n| n.kind() == "string")
+            .and_then(|n| text(content, n))
+            .map(|s| s.trim_matches('"').to_string())
+    };
     if let Some(spec) = spec {
+        let mut acur = s.walk();
         let alias = s
-            .named_children()
+            .named_children(&mut acur)
             .find(|n| n.kind() == "identifier" || n.kind() == "period")
             .and_then(|n| text(content, n));
         let local = match alias {
@@ -295,7 +316,8 @@ fn param_type_name(node: &Node, content: &str) -> Option<String> {
         return text(content, &t);
     }
     // parenthesized parameter groups: (*Recv)(...)
-    node.named_children()
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
         .find(|n| n.kind() == "pointer_type" || n.kind() == "identifier" || n.kind() == "type_identifier")
         .and_then(|n| text(content, &n))
 }
@@ -316,7 +338,8 @@ fn visit_calls(
     if depth > 64 || out.len() >= MAX_CALLS_PER_FILE {
         return;
     }
-    for c in node.named_children() {
+    let mut cursor = node.walk();
+    for c in node.named_children(&mut cursor) {
         match c.kind() {
             "function_declaration" | "method_declaration" => {
                 let name = c.child_by_field_name("name").and_then(|n| text(content, n)).unwrap_or_default();
@@ -360,8 +383,13 @@ fn visit_calls(
                     } else {
                         enclosing.last().unwrap().clone()
                     };
-                    let hint = target.clone();
-                    out.push(CallFact { line, from, target, hint, imported_name });
+                    out.push(CallFact {
+                        line,
+                        from,
+                        target: target.clone(),
+                        hint: target,
+                        imported_name,
+                    });
                 }
             }
             "call_expression" => {
@@ -376,7 +404,13 @@ fn visit_calls(
                             } else {
                                 enclosing.last().unwrap().clone()
                             };
-                            out.push(CallFact { line, from, target: t, imported_name: None });
+                            out.push(CallFact {
+                                line,
+                                from,
+                                target: t.clone(),
+                                hint: t,
+                                imported_name: None,
+                            });
                         }
                     }
                 }
@@ -387,7 +421,7 @@ fn visit_calls(
                 visit_calls(c, content, module_id, pkg, out, enclosing, depth + 1);
             }
             _ => {
-                if c.has_named_children() {
+                if c.named_child_count() > 0 {
                     visit_calls(c, content, module_id, pkg, out, enclosing, depth + 1);
                 }
             }
@@ -400,6 +434,6 @@ fn visit_calls(
 // helpers
 // ---------------------------------------------------------------------------
 
-fn text<'a>(content: &'a str, node: &Node) -> Option<String> {
-    node.utf8_text(content).map(str::to_string)
+fn text(content: &str, node: &Node) -> Option<String> {
+    node.utf8_text(content.as_bytes()).map(str::to_string).ok()
 }
