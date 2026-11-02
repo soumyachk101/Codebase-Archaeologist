@@ -190,13 +190,11 @@ pub fn extract(content: &str, path: &str) -> FileAnalysis {
         }
     }
 
-    // Imports.
-    if let Some(imps) = root.child_by_field_name("imports") {
-        let mut icur = imps.walk();
-        for c in imps.named_children(&mut icur) {
-            if c.kind() != "import_declaration" {
-                continue;
-            }
+    // Imports: `import_declaration` nodes are direct children of the
+    // source_file root (there is no `imports` field in tree-sitter-go).
+    let mut icur = root.walk();
+    for c in root.named_children(&mut icur) {
+        if c.kind() == "import_declaration" {
             record_go_imports(c, content, &mut fa);
         }
     }
@@ -227,7 +225,7 @@ fn go_package_name(root: Node<'_>, content: &str) -> Option<String> {
             let mut cc = c.walk();
             return c
                 .named_children(&mut cc)
-                .find(|n| n.kind() == "identifier")
+                .find(|n| n.kind() == "package_identifier")
                 .and_then(|n| text(content, n));
         }
     }
